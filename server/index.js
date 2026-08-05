@@ -106,17 +106,67 @@ function defaultStore() {
 function loadStore() {
   try {
     if (fs.existsSync(STORE)) return JSON.parse(fs.readFileSync(STORE, "utf8"));
-  } catch {}
+  } catch (err) {
+    console.error("[loadStore]", err.message);
+  }
   return defaultStore();
 }
 
 function saveStore(data) {
-  fs.writeFileSync(STORE, JSON.stringify(data, null, 2));
+  const dir = path.dirname(STORE);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const tmp = `${STORE}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf8");
+    fs.renameSync(tmp, STORE);
+    try {
+      fs.chmodSync(STORE, 0o664);
+    } catch {}
+  } catch (err) {
+    try {
+      if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+    } catch {}
+    console.error("[saveStore]", STORE, err.message);
+    throw err;
+  }
+}
+
+/** Merge array records by key so a stale disk reload cannot drop newer in-memory rows. */
+function mergeByKey(primary = [], secondary = [], keyFn) {
+  const map = new Map();
+  for (const row of [...secondary, ...primary]) {
+    if (!row) continue;
+    const key = keyFn(row);
+    if (key == null || key === "") continue;
+    if (!map.has(key)) map.set(key, row);
+  }
+  return [...map.values()];
 }
 
 function reloadStore() {
   try {
-    store = ensureStore(loadStore());
+    const disk = ensureStore(loadStore());
+    const mem = store || disk;
+    disk.orders = mergeByKey(mem.orders, disk.orders, (o) => o.code || `id:${o.id}`).sort((a, b) =>
+      String(b.createdAt || "").localeCompare(String(a.createdAt || ""))
+    );
+    disk.messages = mergeByKey(mem.messages, disk.messages, (m) => m.id).sort((a, b) =>
+      String(b.createdAt || "").localeCompare(String(a.createdAt || ""))
+    );
+    disk.users = mergeByKey(mem.users, disk.users, (u) => String(u.email || "").toLowerCase());
+    disk.products = mergeByKey(disk.products, mem.products, (p) => p.id);
+    disk.coupons = mergeByKey(disk.coupons, mem.coupons, (c) => c.id);
+    disk.banners = mergeByKey(disk.banners, mem.banners, (b) => b.id);
+    disk.categories = mergeByKey(disk.categories, mem.categories, (c) => c.id);
+    const maxOrderId = disk.orders.reduce((m, o) => Math.max(m, Number(o.id) || 0), 0);
+    const maxUserId = disk.users.reduce((m, u) => Math.max(m, Number(u.id) || 0), 0);
+    const maxProductId = disk.products.reduce((m, p) => Math.max(m, Number(p.id) || 0), 0);
+    disk.nextOrderId = Math.max(Number(disk.nextOrderId) || 1, Number(mem.nextOrderId) || 1, maxOrderId + 1);
+    disk.nextUserId = Math.max(Number(disk.nextUserId) || 1, Number(mem.nextUserId) || 1, maxUserId + 1);
+    disk.nextProductId = Math.max(Number(disk.nextProductId) || 1, Number(mem.nextProductId) || 1, maxProductId + 1);
+    store = ensureStore(disk);
+    // Persist merged view so disk catches up with memory (fixes admin missing orders).
+    saveStore(store);
   } catch (err) {
     console.error("[reloadStore]", err.message);
   }
@@ -303,7 +353,16 @@ function sortBySort(a, b) {
   return (a.sort || 0) - (b.sort || 0);
 }
 
-app.get("/api/health", (_req, res) => res.json({ ok: true, brand: "RYVON" }));
+app.get("/api/health", (_req, res) =>
+  res.json({
+    ok: true,
+    brand: "RYVON",
+    pid: process.pid,
+    orders: Array.isArray(store?.orders) ? store.orders.length : 0,
+    messages: Array.isArray(store?.messages) ? store.messages.length : 0,
+    storeFile: STORE,
+  })
+);
 
 app.get("/api/pincode/:pin", async (req, res) => {
   const pin = String(req.params.pin || "").trim();
@@ -415,6 +474,7 @@ app.post("/api/orders", (req, res) => {
   if (!items?.length || !customer?.name || !customer?.phone || !customer?.address) {
     return res.status(400).json({ error: "Missing order details" });
   }
+  reloadStore();
   const subtotal = items.reduce((s, i) => s + Number(i.price) * Number(i.qty), 0);
   const ship = shipping ?? (subtotal >= 999 ? 0 : 79);
   let discount = 0;

@@ -6,5 +6,6 @@ dist/
 .env.local
 client/.env
 server/data/store.json
+server/data/recover-orders.json
 server/uploads/
 ryvon-frontend-dist.zip
