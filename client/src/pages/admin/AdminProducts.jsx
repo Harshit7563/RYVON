@@ -252,7 +252,7 @@ export default function AdminProducts() {
   };
 
   const toggleActive = async (p) => {
-    await adminUpdateProduct(p.id, { ...p, active: !(p.active !== false) });
+    await adminUpdateProduct(p.id, { active: !(p.active !== false) });
     await load();
   };
 

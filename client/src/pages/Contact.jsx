@@ -83,7 +83,8 @@ export default function Contact() {
         name: form.name,
         email: form.email,
         phone: form.phone,
-        message: `[${form.topic}]\n\n${form.message}`,
+        topic: form.topic,
+        message: form.message,
       });
       setOk(true);
       setForm({ name: "", email: "", phone: "", topic: TOPICS[0], message: "" });

@@ -7,3 +7,4 @@ dist/
 client/.env
 server/data/store.json
 server/uploads/
+ryvon-frontend-dist.zip

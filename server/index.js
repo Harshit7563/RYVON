@@ -114,6 +114,14 @@ function saveStore(data) {
   fs.writeFileSync(STORE, JSON.stringify(data, null, 2));
 }
 
+function reloadStore() {
+  try {
+    store = ensureStore(loadStore());
+  } catch (err) {
+    console.error("[reloadStore]", err.message);
+  }
+}
+
 function ensureStore(s) {
   const d = defaultStore();
   if (!s.products?.length) s.products = d.products;
@@ -281,7 +289,7 @@ saveStore(store);
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "12mb" }));
+app.use(express.json({ limit: "25mb" }));
 app.use("/uploads", express.static(UPLOADS));
 app.use("/products", express.static(path.join(__dirname, "../client/public/products")));
 
@@ -470,12 +478,23 @@ app.get("/api/orders/:code", (req, res) => {
 });
 
 app.post("/api/contact", (req, res) => {
-  const { name, email, phone, message } = req.body || {};
+  const { name, email, phone, message, topic } = req.body || {};
   if (!name || !email || !message) return res.status(400).json({ error: "Missing fields" });
-  const msg = { id: Date.now(), name, email, phone: phone || "", message, createdAt: new Date().toISOString(), read: false };
+  const text = topic ? `[${topic}]\n\n${message}` : message;
+  const msg = {
+    id: Date.now(),
+    name: String(name).trim(),
+    email: String(email).trim().toLowerCase(),
+    phone: phone || "",
+    topic: topic || "",
+    message: text,
+    createdAt: new Date().toISOString(),
+    read: false,
+  };
+  reloadStore();
   store.messages.unshift(msg);
   saveStore(store);
-  res.status(201).json({ ok: true });
+  res.status(201).json({ ok: true, id: msg.id });
 });
 
 /* Storefront auth — persist users for admin */
@@ -605,6 +624,7 @@ app.post("/api/admin/upload", authAdmin, (req, res) => {
 });
 
 app.get("/api/admin/stats", authAdmin, (_req, res) => {
+  reloadStore();
   const revenue = store.orders.reduce((s, o) => s + (o.status !== "cancelled" ? o.total : 0), 0);
   res.json({
     products: store.products.length,
@@ -710,6 +730,7 @@ app.post("/api/admin/products", authAdmin, (req, res) => {
 });
 
 app.put("/api/admin/products/:id", authAdmin, (req, res) => {
+  reloadStore();
   const idx = store.products.findIndex((p) => p.id === Number(req.params.id));
   if (idx < 0) return res.status(404).json({ error: "Not found" });
   const b = req.body || {};
@@ -718,7 +739,11 @@ app.put("/api/admin/products/:id", authAdmin, (req, res) => {
     ? b.sizes.map(Number).filter((n) => !Number.isNaN(n))
     : prev.sizes || [7, 8, 9, 10, 11];
   let stock = { ...(prev.stock || {}) };
-  if (b.stock && typeof b.stock === "object") stock = { ...stock, ...b.stock };
+  if (b.stock && typeof b.stock === "object") {
+    Object.entries(b.stock).forEach(([k, v]) => {
+      stock[String(k)] = Math.max(0, Number(v) || 0);
+    });
+  }
   sizes.forEach((s) => {
     const key = String(s);
     if (stock[key] == null) stock[key] = 10;
@@ -727,32 +752,37 @@ app.put("/api/admin/products/:id", authAdmin, (req, res) => {
     if (!sizes.includes(Number(k))) delete stock[k];
   });
   const images = Array.isArray(b.images) && b.images.length
-    ? b.images
+    ? b.images.filter(Boolean)
     : b.image
       ? [b.image, ...(prev.images || []).filter((u) => u !== b.image).slice(0, 5)]
       : prev.images || [prev.image];
 
-  store.products[idx] = {
+  const next = {
     ...prev,
-    ...b,
-    id: prev.id,
+    name: b.name != null ? String(b.name) : prev.name,
+    type: b.type != null ? String(b.type) : prev.type,
+    category: b.category != null ? String(b.category) : prev.category,
     price: b.price != null ? Number(b.price) : prev.price,
     mrp: b.mrp != null ? Number(b.mrp) : prev.mrp,
+    badge: b.badge !== undefined ? b.badge || null : prev.badge,
+    description: b.description != null ? String(b.description) : prev.description,
     active: b.active !== undefined ? b.active !== false : prev.active !== false,
     sizes,
     stock,
     images,
     image: images[0] || prev.image,
+    id: prev.id,
   };
   if (Array.isArray(b.colorOptions)) {
-    store.products[idx].colorOptions = b.colorOptions.map((c) =>
+    next.colorOptions = b.colorOptions.map((c) =>
       typeof c === "string"
         ? { name: c, hex: c }
         : { name: String(c.name || "Color"), hex: String(c.hex || "#111111") }
     );
-    store.products[idx].colors = store.products[idx].colorOptions.length;
+    next.colors = next.colorOptions.length;
   }
-  if (Array.isArray(b.features)) store.products[idx].features = b.features;
+  if (Array.isArray(b.features)) next.features = b.features;
+  store.products[idx] = next;
   saveStore(store);
   res.json(store.products[idx]);
 });
@@ -874,9 +904,13 @@ app.delete("/api/admin/banners/:id", authAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/api/admin/orders", authAdmin, (_req, res) => res.json(store.orders));
+app.get("/api/admin/orders", authAdmin, (_req, res) => {
+  reloadStore();
+  res.json(Array.isArray(store.orders) ? store.orders : []);
+});
 
 app.patch("/api/admin/orders/:id", authAdmin, (req, res) => {
+  reloadStore();
   const o = store.orders.find((x) => x.id === Number(req.params.id));
   if (!o) return res.status(404).json({ error: "Not found" });
   if (req.body?.status) o.status = req.body.status;
@@ -884,7 +918,10 @@ app.patch("/api/admin/orders/:id", authAdmin, (req, res) => {
   res.json(o);
 });
 
-app.get("/api/admin/messages", authAdmin, (_req, res) => res.json(store.messages));
+app.get("/api/admin/messages", authAdmin, (_req, res) => {
+  reloadStore();
+  res.json(Array.isArray(store.messages) ? store.messages : []);
+});
 
 app.patch("/api/admin/messages/:id", authAdmin, (req, res) => {
   const m = store.messages.find((x) => x.id === Number(req.params.id));

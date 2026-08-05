@@ -6,7 +6,10 @@ export default function AdminMessages() {
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("all");
 
-  const load = () => adminMessages().then(setList).catch((e) => setError(e.message));
+  const load = () =>
+    adminMessages()
+      .then((data) => setList(Array.isArray(data) ? data : []))
+      .catch((e) => setError(e.message));
   useEffect(() => { load(); }, []);
 
   const mark = async (id) => {
@@ -20,8 +23,6 @@ export default function AdminMessages() {
     await load();
   };
 
-  if (error) return <p className="text-tss">{error}</p>;
-
   const shown = list.filter((m) => {
     if (filter === "unread") return !m.read;
     if (filter === "read") return m.read;
@@ -30,7 +31,17 @@ export default function AdminMessages() {
 
   return (
     <div>
-      <h1 className="font-display text-2xl font-extrabold uppercase">Messages</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="font-display text-2xl font-extrabold uppercase">Messages</h1>
+        <button
+          type="button"
+          onClick={() => { setError(""); load(); }}
+          className="rounded-lg border border-line px-3 py-2 text-[11px] font-bold uppercase hover:border-tss"
+        >
+          Refresh
+        </button>
+      </div>
+      {error && <p className="mt-3 text-sm font-semibold text-tss">{error}</p>}
       <div className="mt-4 flex flex-wrap gap-2">
         {[
           ["all", "All"],
@@ -50,6 +61,8 @@ export default function AdminMessages() {
         ))}
       </div>
 
+      <p className="mt-3 text-xs text-mute">{shown.length} of {list.length} messages</p>
+
       <div className="mt-5 space-y-3">
         {shown.length === 0 && <p className="rounded-xl border border-line bg-white p-8 text-center text-mute">No messages</p>}
         {shown.map((m) => (
@@ -61,6 +74,7 @@ export default function AdminMessages() {
                   <a href={`mailto:${m.email}`} className="underline hover:text-tss">{m.email}</a>
                   {m.phone ? ` · ${m.phone}` : ""}
                 </p>
+                {m.topic && <p className="mt-1 text-[11px] font-bold uppercase text-tss">{m.topic}</p>}
               </div>
               <div className="flex gap-3">
                 {!m.read && (
@@ -77,7 +91,7 @@ export default function AdminMessages() {
               </div>
             </div>
             <p className="mt-3 text-sm leading-relaxed text-[#444] whitespace-pre-wrap">{m.message}</p>
-            <p className="mt-2 text-[11px] text-mute">{new Date(m.createdAt).toLocaleString()}</p>
+            <p className="mt-2 text-[11px] text-mute">{m.createdAt ? new Date(m.createdAt).toLocaleString() : ""}</p>
           </div>
         ))}
       </div>
