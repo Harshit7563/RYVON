@@ -522,6 +522,7 @@ app.post("/api/orders", (req, res) => {
 });
 
 app.get("/api/my-orders", (req, res) => {
+  reloadStore();
   const email = String(req.query.email || "").trim().toLowerCase();
   if (!email) return res.status(400).json({ error: "Email required" });
   const list = store.orders.filter((o) => {
@@ -532,6 +533,7 @@ app.get("/api/my-orders", (req, res) => {
 });
 
 app.get("/api/orders/:code", (req, res) => {
+  reloadStore();
   const o = store.orders.find((x) => x.code === req.params.code || String(x.id) === req.params.code);
   if (!o) return res.status(404).json({ error: "Order not found" });
   res.json(o);
@@ -1080,4 +1082,50 @@ app.delete("/api/admin/coupons/:id", authAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
-app.listen(PORT, () => console.log(`RYVON API http://localhost:${PORT}`));
+/* Single-instance guard — prevents duplicate APIs (admin missing orders). */
+const PIDFILE = path.join(__dirname, "data", "api.pid");
+function claimPidFile() {
+  const dir = path.dirname(PIDFILE);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  if (fs.existsSync(PIDFILE)) {
+    const oldPid = Number(String(fs.readFileSync(PIDFILE, "utf8")).trim());
+    if (oldPid && oldPid !== process.pid) {
+      try {
+        process.kill(oldPid, 0);
+        console.error(`[fatal] RYVON API already running as pid ${oldPid}. Kill it first.`);
+        process.exit(1);
+      } catch {
+        /* stale pidfile */
+      }
+    }
+  }
+  fs.writeFileSync(PIDFILE, String(process.pid));
+  const cleanup = () => {
+    try {
+      if (String(fs.readFileSync(PIDFILE, "utf8")).trim() === String(process.pid)) {
+        fs.unlinkSync(PIDFILE);
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+  process.on("exit", cleanup);
+  process.on("SIGINT", () => {
+    cleanup();
+    process.exit(0);
+  });
+  process.on("SIGTERM", () => {
+    cleanup();
+    process.exit(0);
+  });
+}
+claimPidFile();
+
+/* Bind IPv4 only — Apache proxies to 127.0.0.1:PORT (avoids :: vs 127.0.0.1 dual listeners). */
+const server = app.listen(PORT, "127.0.0.1", () => {
+  console.log(`RYVON API http://127.0.0.1:${PORT} pid=${process.pid} store=${STORE}`);
+});
+server.on("error", (err) => {
+  console.error("[fatal] listen failed:", err.message);
+  process.exit(1);
+});
