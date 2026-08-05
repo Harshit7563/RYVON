@@ -339,6 +339,16 @@ saveStore(store);
 
 const app = express();
 app.use(cors());
+app.use((req, res, next) => {
+  // Prevent CDN/browser from caching API (was serving stale admin orders).
+  if (req.path.startsWith("/api") || req.url.startsWith("/api")) {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Surrogate-Control", "no-store");
+  }
+  next();
+});
 app.use(express.json({ limit: "25mb" }));
 app.use("/uploads", express.static(UPLOADS));
 app.use("/products", express.static(path.join(__dirname, "../client/public/products")));
