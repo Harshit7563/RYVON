@@ -14,12 +14,20 @@ export function mediaUrl(src) {
 
 async function req(url, options = {}) {
   const { headers: extraHeaders, ...rest } = options;
+  const method = (rest.method || "GET").toUpperCase();
+  let path = url;
+  if (method === "GET") {
+    path += (path.includes("?") ? "&" : "?") + `_=${Date.now()}`;
+  }
   let res;
   try {
-    res = await fetch(`${API}${url}`, {
+    res = await fetch(`${API}${path}`, {
+      cache: "no-store",
       ...rest,
       headers: {
         "Content-Type": "application/json",
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
         ...(extraHeaders || {}),
       },
     });
