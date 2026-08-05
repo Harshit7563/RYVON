@@ -64,19 +64,21 @@ echo "==> git pull + start ONE API"
 cd "$APP" && git pull origin main
 cd "$APP/server"
 npm install --omit=dev --no-audit --maxsockets=1
-touch "$LOG"
-chown ryvon:ryvon "$LOG" 2>/dev/null || true
 mkdir -p data uploads/products
+# Log file may be root-owned from earlier runs — fall back to home log
+if ! touch "$LOG" 2>/dev/null; then
+  LOG="$HOME/ryvon-api.log"
+  touch "$LOG" || true
+  echo "Using log: $LOG"
+fi
+chown ryvon:ryvon "$LOG" 2>/dev/null || true
 chown -R ryvon:ryvon data uploads 2>/dev/null || true
 
-# Prefer running as ryvon so file ownership stays consistent
-if id ryvon >/dev/null 2>&1; then
-  sudo -u ryvon bash -lc "cd '$APP/server' && PORT=$PORT nohup node index.js >> '$LOG' 2>&1 &"
-else
-  PORT=$PORT nohup node index.js >> "$LOG" 2>&1 &
-fi
+cd "$APP/server"
+PORT=$PORT nohup node index.js >> "$LOG" 2>&1 &
 sleep 1
 echo "==> health (call twice — pid must be SAME both times)"
 curl -s "http://127.0.0.1:$PORT/api/health"; echo
 curl -s "http://127.0.0.1:$PORT/api/health"; echo
 echo "Done. If pids differ, duplicate processes still exist."
+echo "Log: $LOG"
