@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   adminCategories,
   adminCreateProduct,
@@ -46,21 +46,21 @@ const EMPTY = () => ({
 });
 
 function normalizeColors(p) {
-  if (Array.isArray(p.colorOptions) && p.colorOptions.length) {
+  if (Array.isArray(p?.colorOptions) && p.colorOptions.length) {
     return p.colorOptions.map((c) =>
-      typeof c === "string" ? { name: c, hex: c } : { name: c.name || "Color", hex: c.hex || "#111111" }
+      typeof c === "string" ? { name: c, hex: c } : { name: c?.name || "Color", hex: c?.hex || "#111111" }
     );
   }
-  return PRESET_COLORS.slice(0, Math.min(Math.max(Number(p.colors) || 2, 1), 5));
+  return PRESET_COLORS.slice(0, Math.min(Math.max(Number(p?.colors) || 2, 1), 5));
 }
 
 function normalizeSizes(p) {
-  if (Array.isArray(p.sizes) && p.sizes.length) return p.sizes.map(Number);
+  if (Array.isArray(p?.sizes) && p.sizes.length) return p.sizes.map(Number).filter((n) => !Number.isNaN(n));
   return [7, 8, 9, 10, 11];
 }
 
 function normalizeStock(p, sizes) {
-  const stock = { ...(p.stock || {}) };
+  const stock = { ...(p?.stock || {}) };
   sizes.forEach((s) => {
     const k = String(s);
     if (stock[k] == null) stock[k] = 10;
@@ -68,55 +68,83 @@ function normalizeStock(p, sizes) {
   return stock;
 }
 
+function featuresToText(features) {
+  if (Array.isArray(features)) return features.filter(Boolean).join("|");
+  if (typeof features === "string") return features;
+  return "Premium build|Everyday comfort";
+}
+
+function formFromProduct(p) {
+  const sizes = normalizeSizes(p);
+  return {
+    name: p?.name || "",
+    type: p?.type || "Men Low Top Sneakers",
+    category: p?.category || "air-force",
+    price: p?.price != null ? String(p.price) : "",
+    mrp: p?.mrp != null ? String(p.mrp) : "",
+    badge: p?.badge || "",
+    description: p?.description || "",
+    featuresText: featuresToText(p?.features),
+    active: p?.active !== false,
+    images: p?.images?.length ? [...p.images] : p?.image ? [p.image] : [],
+    colorOptions: normalizeColors(p),
+    sizes,
+    stock: normalizeStock(p, sizes),
+  };
+}
+
 export default function AdminProducts() {
   const [list, setList] = useState([]);
   const [cats, setCats] = useState([]);
   const [form, setForm] = useState(EMPTY);
   const [editId, setEditId] = useState(null);
+  const editIdRef = useRef(null);
+  const formRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [uploadingExtra, setUploadingExtra] = useState(false);
   const [error, setError] = useState("");
+  const [okMsg, setOkMsg] = useState("");
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
 
   const load = () =>
     Promise.all([adminProducts(), adminCategories()])
       .then(([products, categories]) => {
-        setList(products);
-        setCats(categories.filter((c) => (c.filter || c.slug) !== "sale"));
+        setList(Array.isArray(products) ? products : []);
+        setCats((categories || []).filter((c) => (c.filter || c.slug) !== "sale"));
       })
       .catch((e) => setError(e.message));
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
+  const setEditing = (id) => {
+    editIdRef.current = id;
+    setEditId(id);
+  };
+
   const startEdit = (p) => {
-    const sizes = normalizeSizes(p);
-    setEditId(p.id);
-    setForm({
-      name: p.name,
-      type: p.type,
-      category: p.category,
-      price: String(p.price),
-      mrp: String(p.mrp),
-      badge: p.badge || "",
-      description: p.description || "",
-      featuresText: (p.features || []).join("|"),
-      active: p.active !== false,
-      images: p.images?.length ? [...p.images] : p.image ? [p.image] : [],
-      colorOptions: normalizeColors(p),
-      sizes,
-      stock: normalizeStock(p, sizes),
-    });
+    if (!p || p.id == null) {
+      setError("Invalid product — refresh and try again");
+      return;
+    }
+    setError("");
+    setOkMsg("");
+    setEditing(p.id);
+    setForm(formFromProduct(p));
     setOpen(true);
+    setTimeout(() => formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   };
 
   const reset = () => {
-    setEditId(null);
+    setEditing(null);
     setForm(EMPTY());
     setOpen(false);
     setError("");
+    setOkMsg("");
   };
 
   const toggleSize = (size) => {
@@ -208,6 +236,7 @@ export default function AdminProducts() {
     }
     setBusy(true);
     setError("");
+    setOkMsg("");
     try {
       const colorOptions = form.colorOptions.map((c) => ({
         name: (c.name || "Color").trim(),
@@ -234,12 +263,24 @@ export default function AdminProducts() {
         stock: form.stock,
         features,
       };
-      if (editId) await adminUpdateProduct(editId, body);
-      else await adminCreateProduct(body);
-      reset();
+      const currentId = editIdRef.current;
+      if (currentId != null && currentId !== "") {
+        const updated = await adminUpdateProduct(currentId, body);
+        setForm(formFromProduct(updated));
+        setEditing(updated.id);
+        setOkMsg("Product updated");
+      } else {
+        const created = await adminCreateProduct(body);
+        // Stay on the form in edit mode so admin can keep editing right away.
+        setForm(formFromProduct(created));
+        setEditing(created.id);
+        setOpen(true);
+        setOkMsg("Product added — ab aap edit kar sakte ho");
+      }
       await load();
+      setTimeout(() => formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
     } catch (err) {
-      setError(err.message);
+      setError(err.message || "Save failed");
     } finally {
       setBusy(false);
     }
@@ -247,8 +288,13 @@ export default function AdminProducts() {
 
   const remove = async (id) => {
     if (!confirm("Delete this product?")) return;
-    await adminDeleteProduct(id);
-    await load();
+    try {
+      await adminDeleteProduct(id);
+      if (String(editIdRef.current) === String(id)) reset();
+      await load();
+    } catch (err) {
+      setError(err.message || "Delete failed");
+    }
   };
 
   const toggleActive = async (p) => {
@@ -264,11 +310,18 @@ export default function AdminProducts() {
   const catOptions = cats.length
     ? cats.map((c) => c.filter || c.slug || c.id)
     : ["air-force", "low-dunk", "travis-scott", "jordan", "retro", "samba"];
+  const categoryChoices = form.category && !catOptions.includes(form.category)
+    ? [form.category, ...catOptions]
+    : catOptions;
 
   const shown = list.filter((p) => {
     if (!q.trim()) return true;
     const s = q.toLowerCase();
-    return p.name.toLowerCase().includes(s) || p.category.includes(s) || (p.type || "").toLowerCase().includes(s);
+    return (
+      String(p.name || "").toLowerCase().includes(s) ||
+      String(p.category || "").toLowerCase().includes(s) ||
+      String(p.type || "").toLowerCase().includes(s)
+    );
   });
 
   return (
@@ -281,9 +334,12 @@ export default function AdminProducts() {
         <button
           type="button"
           onClick={() => {
-            setEditId(null);
+            setEditing(null);
             setForm({ ...EMPTY(), category: catOptions[0] || "air-force" });
+            setOkMsg("");
+            setError("");
             setOpen(true);
+            setTimeout(() => formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
           }}
           className="bg-tss px-4 py-2.5 text-xs font-bold uppercase text-white"
         >
@@ -299,13 +355,19 @@ export default function AdminProducts() {
       />
 
       {open && (
-        <form onSubmit={save} className="mt-5 rounded-xl border border-line bg-white p-4 shadow-sm">
-          <h2 className="text-sm font-bold uppercase">{editId ? "Edit Product" : "New Product"}</h2>
+        <form
+          ref={formRef}
+          onSubmit={save}
+          className="mt-5 scroll-mt-4 rounded-xl border border-line bg-white p-4 shadow-sm"
+        >
+          <h2 className="text-sm font-bold uppercase">
+            {editId != null ? `Edit Product #${editId}` : "New Product"}
+          </h2>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <input required placeholder="Name *" value={form.name} onChange={(e) => set("name", e.target.value)} className="border border-line px-3 py-2.5 text-sm outline-none focus:border-tss" />
             <input placeholder="Type" value={form.type} onChange={(e) => set("type", e.target.value)} className="border border-line px-3 py-2.5 text-sm outline-none focus:border-tss" />
             <select value={form.category} onChange={(e) => set("category", e.target.value)} className="border border-line px-3 py-2.5 text-sm">
-              {catOptions.map((c) => (
+              {categoryChoices.map((c) => (
                 <option key={c} value={c}>{c}</option>
               ))}
             </select>
@@ -418,12 +480,15 @@ export default function AdminProducts() {
               className="border border-line px-3 py-2.5 text-sm outline-none focus:border-tss sm:col-span-2"
             />
           </div>
+          {okMsg && <p className="mt-2 text-xs font-semibold text-off">{okMsg}</p>}
           {error && <p className="mt-2 text-xs font-semibold text-tss">{error}</p>}
           <div className="mt-3 flex gap-2">
             <button type="submit" disabled={busy || uploadingExtra} className="bg-tss px-4 py-2.5 text-xs font-bold uppercase text-white disabled:opacity-60">
-              {busy ? "Saving…" : "Save"}
+              {busy ? "Saving…" : editId != null ? "Update Product" : "Save Product"}
             </button>
-            <button type="button" onClick={reset} className="border border-line px-4 py-2.5 text-xs font-bold uppercase">Cancel</button>
+            <button type="button" onClick={reset} className="border border-line px-4 py-2.5 text-xs font-bold uppercase">
+              {editId != null ? "Close" : "Cancel"}
+            </button>
           </div>
         </form>
       )}
