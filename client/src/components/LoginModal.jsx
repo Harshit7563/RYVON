@@ -41,14 +41,14 @@ export default function LoginModal() {
 
   const finishOk = () => {
     setDone(true);
+    setBusy(false);
     setTimeout(() => {
-      setBusy(false);
       setName("");
       setEmail("");
       setPassword("");
       setPhone("");
       setDone(false);
-    }, 650);
+    }, 280);
   };
 
   const submit = async (e) => {

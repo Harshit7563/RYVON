@@ -252,8 +252,13 @@ export default function AdminProducts() {
   };
 
   const toggleActive = async (p) => {
-    await adminUpdateProduct(p.id, { active: !(p.active !== false) });
-    await load();
+    try {
+      setError("");
+      await adminUpdateProduct(p.id, { active: !(p.active !== false) });
+      await load();
+    } catch (err) {
+      setError(err.message || "Could not update product");
+    }
   };
 
   const catOptions = cats.length

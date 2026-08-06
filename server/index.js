@@ -154,10 +154,11 @@ function reloadStore() {
       String(b.createdAt || "").localeCompare(String(a.createdAt || ""))
     );
     disk.users = mergeByKey(mem.users, disk.users, (u) => String(u.email || "").toLowerCase());
-    disk.products = mergeByKey(disk.products, mem.products, (p) => p.id);
-    disk.coupons = mergeByKey(disk.coupons, mem.coupons, (c) => c.id);
-    disk.banners = mergeByKey(disk.banners, mem.banners, (b) => b.id);
-    disk.categories = mergeByKey(disk.categories, mem.categories, (c) => c.id);
+    // Prefer in-memory rows so a just-added product is never dropped by a stale disk read.
+    disk.products = mergeByKey(mem.products, disk.products, (p) => p.id);
+    disk.coupons = mergeByKey(mem.coupons, disk.coupons, (c) => c.id);
+    disk.banners = mergeByKey(mem.banners, disk.banners, (b) => b.id);
+    disk.categories = mergeByKey(mem.categories, disk.categories, (c) => c.id);
     const maxOrderId = disk.orders.reduce((m, o) => Math.max(m, Number(o.id) || 0), 0);
     const maxUserId = disk.users.reduce((m, u) => Math.max(m, Number(u.id) || 0), 0);
     const maxProductId = disk.products.reduce((m, p) => Math.max(m, Number(p.id) || 0), 0);
@@ -609,8 +610,15 @@ app.post("/api/auth/login", (req, res) => {
   }
   if (!user.password && password) user.password = password;
   user.lastLoginAt = new Date().toISOString();
-  saveStore(store);
+  // Respond first — sync disk write made login feel slow on larger stores.
   res.json(publicUser(user));
+  setImmediate(() => {
+    try {
+      saveStore(store);
+    } catch (err) {
+      console.error("[auth/login save]", err.message);
+    }
+  });
 });
 
 app.post("/api/auth/google", (req, res) => {
@@ -698,6 +706,8 @@ app.post("/api/admin/upload", authAdmin, (req, res) => {
 app.get("/api/admin/stats", authAdmin, (_req, res) => {
   reloadStore();
   const revenue = store.orders.reduce((s, o) => s + (o.status !== "cancelled" ? o.total : 0), 0);
+  const openOrders = store.orders.filter((o) => o.status === "placed").length;
+  const unreadMessages = store.messages.filter((m) => !m.read).length;
   res.json({
     products: store.products.length,
     categories: store.categories.length,
@@ -705,9 +715,25 @@ app.get("/api/admin/stats", authAdmin, (_req, res) => {
     coupons: store.coupons.length,
     users: store.users.length,
     orders: store.orders.length,
-    messages: store.messages.filter((m) => !m.read).length,
+    messages: unreadMessages,
     revenue,
     recentOrders: store.orders.slice(0, 5),
+    badges: {
+      orders: openOrders,
+      messages: unreadMessages,
+      users: store.users.filter((u) => {
+        const t = Date.parse(u.createdAt || u.lastLoginAt || "");
+        return Number.isFinite(t) && Date.now() - t < 7 * 24 * 60 * 60 * 1000;
+      }).length,
+      products: store.products.filter((p) => {
+        const t = Date.parse(p.createdAt || p.updatedAt || "");
+        return Number.isFinite(t) && Date.now() - t < 7 * 24 * 60 * 60 * 1000;
+      }).length,
+      categories: store.categories.length,
+      banners: store.banners.filter((b) => b.active !== false).length,
+      coupons: store.coupons.filter((c) => c.active !== false).length,
+      dashboard: openOrders + unreadMessages,
+    },
   });
 });
 
@@ -753,9 +779,13 @@ app.patch("/api/admin/users/:id", authAdmin, (req, res) => {
 });
 
 /* Products */
-app.get("/api/admin/products", authAdmin, (_req, res) => res.json(store.products));
+app.get("/api/admin/products", authAdmin, (_req, res) => {
+  reloadStore();
+  res.json(Array.isArray(store.products) ? store.products : []);
+});
 
 app.post("/api/admin/products", authAdmin, (req, res) => {
+  reloadStore();
   const b = req.body || {};
   if (!b.name || !b.price) return res.status(400).json({ error: "Name and price required" });
   const sizes = Array.isArray(b.sizes) && b.sizes.length
@@ -767,6 +797,7 @@ app.post("/api/admin/products", authAdmin, (req, res) => {
     stock[key] = b.stock && b.stock[key] != null ? Number(b.stock[key]) : 10;
   });
   const images = Array.isArray(b.images) && b.images.length ? b.images : [b.image || "/products/p1.jpg"];
+  const now = new Date().toISOString();
   const product = {
     id: store.nextProductId++,
     name: b.name,
@@ -795,6 +826,8 @@ app.post("/api/admin/products", authAdmin, (req, res) => {
     images,
     description: b.description || "",
     features: Array.isArray(b.features) ? b.features : (b.features ? String(b.features).split("|").map((s) => s.trim()).filter(Boolean) : ["Premium build", "Everyday comfort"]),
+    createdAt: now,
+    updatedAt: now,
   };
   store.products.unshift(product);
   saveStore(store);
@@ -802,9 +835,14 @@ app.post("/api/admin/products", authAdmin, (req, res) => {
 });
 
 app.put("/api/admin/products/:id", authAdmin, (req, res) => {
-  reloadStore();
-  const idx = store.products.findIndex((p) => p.id === Number(req.params.id));
-  if (idx < 0) return res.status(404).json({ error: "Not found" });
+  // Avoid reload-first race that dropped freshly added products (404 on edit).
+  const idKey = String(req.params.id);
+  let idx = store.products.findIndex((p) => String(p.id) === idKey);
+  if (idx < 0) {
+    reloadStore();
+    idx = store.products.findIndex((p) => String(p.id) === idKey);
+  }
+  if (idx < 0) return res.status(404).json({ error: "Product not found. Refresh and try again." });
   const b = req.body || {};
   const prev = store.products[idx];
   const sizes = Array.isArray(b.sizes) && b.sizes.length
@@ -844,6 +882,8 @@ app.put("/api/admin/products/:id", authAdmin, (req, res) => {
     images,
     image: images[0] || prev.image,
     id: prev.id,
+    createdAt: prev.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
   if (Array.isArray(b.colorOptions)) {
     next.colorOptions = b.colorOptions.map((c) =>
