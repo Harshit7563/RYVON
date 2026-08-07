@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { createOrder, cancelRazorpayPayment, getSite, inr, lookupPincode, validateCoupon, verifyRazorpayPayment } from "../api";
-import { openRazorpayCheckout } from "../razorpay";
+import { loadRazorpayScript, openRazorpayCheckout } from "../razorpay";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
 
@@ -54,11 +54,10 @@ export default function Checkout() {
       .then((s) => {
         if (s?.prepaidPercent != null) setPrepaidPct(Number(s.prepaidPercent) || 5);
         setRazorpayEnabled(!!s?.razorpayEnabled);
-        if (s?.razorpayEnabled && payment === "cod") {
-          /* keep default COD */
-        }
       })
       .catch(() => {});
+    // Prefetch Checkout.js so Pay Online opens immediately after order create
+    loadRazorpayScript().catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -193,7 +192,10 @@ export default function Checkout() {
       });
       createdCode = order.code;
 
-      if (payment === "razorpay" && order.razorpay) {
+      if (payment === "razorpay") {
+        if (!order.razorpay) {
+          throw new Error("Payment session could not be started. Please try again.");
+        }
         paymentStarted = true;
         const payload = await openRazorpayCheckout(order.razorpay, order.code);
         await verifyRazorpayPayment(payload);
@@ -332,7 +334,7 @@ export default function Checkout() {
                 {
                   id: "cod",
                   label: "Cash on Delivery",
-                  hint: "Pay with cash or UPI when your order arrives",
+                  hint: "Pay cash to the delivery partner when your order arrives",
                   badge: "Popular",
                   icon: (
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
@@ -345,8 +347,8 @@ export default function Checkout() {
                 razorpayEnabled
                   ? {
                       id: "razorpay",
-                      label: "Pay Online · Razorpay",
-                      hint: `Extra ${prepaidPct}% off · Cards, UPI/QR, Netbanking, EMI, Wallet, Pay Later & International`,
+                      label: "UPI / Cards · Razorpay",
+                      hint: `Extra ${prepaidPct}% off · UPI, QR, Cards, Netbanking, EMI, Wallet & more`,
                       badge: `${prepaidPct}% OFF`,
                       icon: (
                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>

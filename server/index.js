@@ -1009,6 +1009,67 @@ app.get("/api/orders/:code", (req, res) => {
   res.json(o);
 });
 
+/** Resume Razorpay checkout for a pending_payment order. */
+app.post("/api/orders/:code/pay", async (req, res) => {
+  if (!razorpayConfigured()) {
+    return res.status(503).json({ error: "Online payments are not configured" });
+  }
+  reloadStore();
+  const order = store.orders.find((x) => x.code === req.params.code || String(x.id) === req.params.code);
+  if (!order) return res.status(404).json({ error: "Order not found" });
+  if (order.paymentStatus === "paid" || order.status === "placed" || order.status === "confirmed") {
+    return res.json({ ok: true, alreadyPaid: true, order });
+  }
+  if (order.status !== "pending_payment") {
+    return res.status(400).json({ error: "Order is not awaiting payment" });
+  }
+
+  const pub = getRazorpayPublic();
+  const amountPaise = Math.round(Number(order.total) * 100);
+  let rzpOrderId = order.razorpayOrderId;
+
+  try {
+    if (!rzpOrderId) {
+      const rzpOrder = await createRazorpayOrder({
+        amountPaise,
+        receipt: order.code,
+        notes: {
+          orderCode: order.code,
+          email: order.customer?.email || "",
+          phone: String(order.customer?.phone || ""),
+        },
+      });
+      rzpOrderId = rzpOrder.id;
+      order.razorpayOrderId = rzpOrderId;
+      order.razorpayAmount = amountPaise;
+      order.payment = "razorpay";
+      order.paymentStatus = "pending";
+      saveStore(store);
+    }
+    return res.json({
+      code: order.code,
+      razorpay: {
+        keyId: pub.keyId,
+        orderId: rzpOrderId,
+        amount: order.razorpayAmount || amountPaise,
+        currency: "INR",
+        name: "RYVON",
+        description: `Order ${order.code}`,
+        prefill: {
+          name: order.customer?.name || "",
+          email: order.customer?.email || "",
+          contact: String(order.customer?.phone || "")
+            .replace(/\D/g, "")
+            .slice(-10),
+        },
+      },
+    });
+  } catch (err) {
+    console.error("[razorpay resume]", err?.message || err);
+    return res.status(502).json({ error: err.message || "Could not start payment" });
+  }
+});
+
 app.post("/api/contact", (req, res) => {
   const { name, email, phone, message, topic } = req.body || {};
   if (!name || !email || !message) return res.status(400).json({ error: "Missing fields" });

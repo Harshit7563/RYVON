@@ -5,6 +5,10 @@ export function loadRazorpayScript() {
   return new Promise((resolve, reject) => {
     const existing = document.querySelector("script[data-ryvon-razorpay]");
     if (existing) {
+      if (window.Razorpay) {
+        resolve(window.Razorpay);
+        return;
+      }
       existing.addEventListener("load", () => resolve(window.Razorpay));
       existing.addEventListener("error", () => reject(new Error("Razorpay script failed")));
       return;
@@ -42,14 +46,7 @@ export async function openRazorpayCheckout(razorpay, orderCode) {
       order_id: razorpay.orderId || razorpay.order_id,
       prefill: razorpay.prefill || {},
       theme: { color: "#ec1c24" },
-      method: {
-        card: true,
-        upi: true,
-        netbanking: true,
-        wallet: true,
-        emi: true,
-        paylater: true,
-      },
+      // Do not force method flags — Razorpay shows whatever is enabled on the account.
       handler(response) {
         resolve({
           orderCode,

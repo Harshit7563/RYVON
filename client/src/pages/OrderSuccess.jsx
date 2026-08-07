@@ -1,17 +1,40 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { getOrder, getSite, inr } from "../api";
+import { getOrder, getSite, inr, resumeOrderPayment, verifyRazorpayPayment } from "../api";
+import { openRazorpayCheckout } from "../razorpay";
 
 export default function OrderSuccess() {
   const { code } = useParams();
   const [order, setOrder] = useState(null);
   const [site, setSite] = useState(null);
   const [err, setErr] = useState("");
+  const [payBusy, setPayBusy] = useState(false);
+  const [payErr, setPayErr] = useState("");
 
   useEffect(() => {
     getOrder(code).then(setOrder).catch((e) => setErr(e.message));
     getSite().then(setSite).catch(() => {});
   }, [code]);
+
+  async function payNow() {
+    setPayErr("");
+    setPayBusy(true);
+    try {
+      const session = await resumeOrderPayment(code);
+      if (session.alreadyPaid) {
+        setOrder(session.order);
+        return;
+      }
+      const payload = await openRazorpayCheckout(session.razorpay, session.code || code);
+      await verifyRazorpayPayment(payload);
+      const fresh = await getOrder(code);
+      setOrder(fresh);
+    } catch (e) {
+      setPayErr(e.message || "Payment could not be completed");
+    } finally {
+      setPayBusy(false);
+    }
+  }
 
   if (err) {
     return (
@@ -30,17 +53,32 @@ export default function OrderSuccess() {
   return (
     <div className="mx-auto max-w-2xl px-4 py-10 sm:py-14 lg:px-6">
       <div className="border border-line bg-wash/50 p-6 text-center sm:p-8">
-        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-off text-2xl text-white">✓</div>
+        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-off text-2xl text-white">
+          {pendingPay ? "!" : "✓"}
+        </div>
         <h1 className="font-display mt-4 text-2xl font-extrabold uppercase">
           {pendingPay ? "Payment Pending" : "Order Placed!"}
         </h1>
         <p className="mt-2 text-sm text-mute">
           {pendingPay
-            ? "Your order is reserved. Complete payment to confirm."
+            ? "Your order is reserved. Complete UPI / card payment on Razorpay to confirm."
             : `Thanks ${order.customer.name}. We’ve got your kicks ready to ship.`}
         </p>
         <p className="mt-4 text-xs font-bold uppercase tracking-wider text-tss">Order ID</p>
         <p className="font-display text-xl font-extrabold">{order.code}</p>
+        {pendingPay && (
+          <div className="mt-5">
+            <button
+              type="button"
+              disabled={payBusy}
+              onClick={payNow}
+              className="w-full bg-tss px-5 py-3.5 text-xs font-bold uppercase text-white hover:bg-tss-dark disabled:opacity-60 sm:w-auto"
+            >
+              {payBusy ? "Opening Razorpay…" : "Pay Now · Razorpay"}
+            </button>
+            {payErr && <p className="mt-3 text-xs font-semibold text-tss">{payErr}</p>}
+          </div>
+        )}
       </div>
 
       {paidOnline && (
