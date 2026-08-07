@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { useWishlist } from "../context/WishlistContext";
 import GoogleSignInButton from "./GoogleSignInButton";
 
 const BENEFITS = ["Track orders live", "Early access drops", "Wishlist sync"];
 
 export default function LoginModal() {
   const { loginOpen, closeLogin, register, loginWithEmail, loginWithGoogle } = useAuth();
+  const { ids: wishIds } = useWishlist();
   const [tab, setTab] = useState("login");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -81,9 +83,10 @@ export default function LoginModal() {
           email: email.trim(),
           phone: phone.trim(),
           password,
+          wishlist: wishIds,
         });
       } else {
-        await loginWithEmail({ email: email.trim(), password });
+        await loginWithEmail({ email: email.trim(), password, wishlist: wishIds });
       }
       finishOk();
     } catch (err) {
@@ -96,7 +99,7 @@ export default function LoginModal() {
     setBusy(true);
     setError("");
     try {
-      await loginWithGoogle(profile);
+      await loginWithGoogle({ ...profile, wishlist: wishIds });
       finishOk();
     } catch (err) {
       setBusy(false);

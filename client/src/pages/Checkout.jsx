@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { createOrder, inr, lookupPincode, validateCoupon } from "../api";
+import { createOrder, cancelRazorpayPayment, getSite, inr, lookupPincode, validateCoupon, verifyRazorpayPayment } from "../api";
+import { openRazorpayCheckout } from "../razorpay";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
 
@@ -13,9 +14,19 @@ const INDIAN_STATES = [
   "Uttarakhand", "West Bengal",
 ];
 
+const RAZORPAY_METHODS = [
+  "Cards",
+  "UPI / QR",
+  "Netbanking",
+  "EMI",
+  "Wallet",
+  "Pay Later",
+  "International",
+];
+
 export default function Checkout() {
   const { items, total, clear } = useCart();
-  const { user, openLogin } = useAuth();
+  const { user } = useAuth();
   const nav = useNavigate();
   const ship = total >= 999 ? 0 : 79;
   const [busy, setBusy] = useState(false);
@@ -26,6 +37,8 @@ export default function Checkout() {
   const [couponBusy, setCouponBusy] = useState(false);
   const [couponMsg, setCouponMsg] = useState("");
   const [pincodeStatus, setPincodeStatus] = useState("");
+  const [prepaidPct, setPrepaidPct] = useState(5);
+  const [razorpayEnabled, setRazorpayEnabled] = useState(false);
   const [form, setForm] = useState({
     name: user?.name || "",
     email: user?.email || "",
@@ -35,6 +48,18 @@ export default function Checkout() {
     state: "",
     pincode: "",
   });
+
+  useEffect(() => {
+    getSite()
+      .then((s) => {
+        if (s?.prepaidPercent != null) setPrepaidPct(Number(s.prepaidPercent) || 5);
+        setRazorpayEnabled(!!s?.razorpayEnabled);
+        if (s?.razorpayEnabled && payment === "cod") {
+          /* keep default COD */
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -87,7 +112,12 @@ export default function Checkout() {
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   const discount = applied?.discount || 0;
-  const grand = useMemo(() => Math.max(0, total - discount) + ship, [total, discount, ship]);
+  const isPrepaid = payment === "razorpay";
+  const prepaidDiscount = isPrepaid ? Math.round((total * prepaidPct) / 100) : 0;
+  const grand = useMemo(
+    () => Math.max(0, total - discount - prepaidDiscount) + ship,
+    [total, discount, prepaidDiscount, ship]
+  );
 
   if (!items.length) {
     return (
@@ -122,26 +152,32 @@ export default function Checkout() {
   const place = async (e) => {
     e.preventDefault();
     setError("");
-    if (!user) {
-      openLogin();
+    if (!form.name || !form.email || !form.phone || !form.address || !form.city || !form.state || !form.pincode) {
+      setError("Please fill all delivery details");
       return;
     }
-    if (!form.name || !form.phone || !form.address || !form.city || !form.state || !form.pincode) {
-      setError("Please fill all delivery details");
+    if (!form.email.includes("@")) {
+      setError("Enter a valid email for order updates");
       return;
     }
     if (!/^\d{6}$/.test(form.pincode.trim())) {
       setError("Enter a valid 6-digit pincode");
       return;
     }
+    if (payment === "razorpay" && !razorpayEnabled) {
+      setError("Online payments are not available right now. Please choose Cash on Delivery.");
+      return;
+    }
     setBusy(true);
+    let createdCode = null;
+    let paymentStarted = false;
     try {
       const order = await createOrder({
         payment,
         customer: {
           ...form,
-          email: (user.email || form.email || "").trim().toLowerCase(),
-          name: form.name || user.name,
+          email: (form.email || user?.email || "").trim().toLowerCase(),
+          name: form.name || user?.name || "",
           pincode: form.pincode.trim(),
         },
         items: items.map((i) => ({
@@ -150,15 +186,29 @@ export default function Checkout() {
           image: i.product.image,
           size: i.size,
           color: i.color,
-          price: i.product.price,
           qty: i.qty,
         })),
         shipping: ship,
         couponCode: applied?.code || undefined,
       });
+      createdCode = order.code;
+
+      if (payment === "razorpay" && order.razorpay) {
+        paymentStarted = true;
+        const payload = await openRazorpayCheckout(order.razorpay, order.code);
+        await verifyRazorpayPayment(payload);
+      }
+
       clear();
       nav(`/order/${order.code}`, { replace: true });
     } catch (err) {
+      if (createdCode && payment === "razorpay" && paymentStarted) {
+        try {
+          await cancelRazorpayPayment(createdCode);
+        } catch {
+          /* ignore */
+        }
+      }
       setError(err.message || "Could not place order");
     } finally {
       setBusy(false);
@@ -168,6 +218,11 @@ export default function Checkout() {
   return (
     <div className="mx-auto max-w-[1280px] px-3 py-6 sm:px-4 sm:py-10 lg:px-6">
       <h1 className="font-display text-xl font-extrabold uppercase sm:text-2xl">Checkout</h1>
+      {!user && (
+        <p className="mt-2 text-sm text-mute">
+          Guest checkout — fill your details below. Have an account? You can still login from the header anytime.
+        </p>
+      )}
       <form onSubmit={place} className="mt-6 grid gap-8 lg:grid-cols-3">
         <div className="space-y-5 lg:col-span-2">
           <section className="border border-line p-4 sm:p-5">
@@ -287,31 +342,24 @@ export default function Checkout() {
                     </svg>
                   ),
                 },
-                {
-                  id: "upi",
-                  label: "UPI / Prepaid",
-                  hint: "GPay, PhonePe, Paytm & other UPI apps",
-                  badge: "Fast",
-                  icon: (
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-                      <path d="M12 3v18M7 8l5-5 5 5M7 16l5 5 5-5" />
-                    </svg>
-                  ),
-                },
-                {
-                  id: "card",
-                  label: "Credit / Debit Card",
-                  hint: "Visa, Mastercard, RuPay & more",
-                  badge: null,
-                  icon: (
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-                      <rect x="2" y="5" width="20" height="14" rx="2" />
-                      <path d="M2 10h20" />
-                      <path d="M6 15h4" />
-                    </svg>
-                  ),
-                },
-              ].map((opt) => {
+                razorpayEnabled
+                  ? {
+                      id: "razorpay",
+                      label: "Pay Online · Razorpay",
+                      hint: `Extra ${prepaidPct}% off · Cards, UPI/QR, Netbanking, EMI, Wallet, Pay Later & International`,
+                      badge: `${prepaidPct}% OFF`,
+                      icon: (
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+                          <rect x="2" y="5" width="20" height="14" rx="2" />
+                          <path d="M2 10h20" />
+                          <path d="M6 15h4" />
+                        </svg>
+                      ),
+                    }
+                  : null,
+              ]
+                .filter(Boolean)
+                .map((opt) => {
                 const selected = payment === opt.id;
                 return (
                   <label
@@ -350,6 +398,18 @@ export default function Checkout() {
                         )}
                       </span>
                       <span className="mt-0.5 block text-[13px] leading-snug text-mute">{opt.hint}</span>
+                      {opt.id === "razorpay" && selected && (
+                        <span className="mt-2 flex flex-wrap gap-1.5">
+                          {RAZORPAY_METHODS.map((m) => (
+                            <span
+                              key={m}
+                              className="border border-line bg-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-mute"
+                            >
+                              {m}
+                            </span>
+                          ))}
+                        </span>
+                      )}
                     </span>
                     <span
                       className={`mt-1 grid h-5 w-5 shrink-0 place-items-center rounded-full border-2 transition ${
@@ -367,6 +427,11 @@ export default function Checkout() {
                 );
               })}
             </div>
+            {!razorpayEnabled && (
+              <p className="mt-3 text-xs text-mute">
+                Online payments (Cards / UPI / Netbanking / EMI / Wallet) will appear here once Razorpay keys are added on the server.
+              </p>
+            )}
           </section>
         </div>
 
@@ -419,8 +484,14 @@ export default function Checkout() {
             <div className="flex justify-between"><span className="text-mute">Subtotal</span><span>{inr(total)}</span></div>
             {discount > 0 && (
               <div className="flex justify-between text-off">
-                <span>Discount ({applied.code})</span>
+                <span>Coupon ({applied.code})</span>
                 <span>−{inr(discount)}</span>
+              </div>
+            )}
+            {prepaidDiscount > 0 && (
+              <div className="flex justify-between text-off">
+                <span>Prepaid ({prepaidPct}% off)</span>
+                <span>−{inr(prepaidDiscount)}</span>
               </div>
             )}
             <div className="flex justify-between"><span className="text-mute">Shipping</span><span>{ship ? inr(ship) : "FREE"}</span></div>
@@ -428,7 +499,7 @@ export default function Checkout() {
           </div>
           {error && <p className="mt-3 text-xs font-semibold text-tss">{error}</p>}
           <button type="submit" disabled={busy} className="mt-5 w-full bg-tss py-3.5 text-xs font-bold uppercase text-white hover:bg-tss-dark disabled:opacity-60">
-            {busy ? "Placing…" : user ? "Place Order" : "Login to Place Order"}
+            {busy ? (payment === "razorpay" ? "Opening payment…" : "Placing…") : payment === "razorpay" ? "Pay & Place Order" : "Place Order"}
           </button>
         </aside>
       </form>

@@ -177,7 +177,7 @@ export default function Home() {
 
       <div className="bg-tss px-3 py-3 text-center text-white sm:py-4">
         <p className="font-display text-[11px] font-extrabold uppercase tracking-[0.1em] sm:text-sm">
-          Made to move. Built to stand out · Extra 5% off on prepaid orders
+          Made to move. Built to stand out · Extra 5% off when you choose prepaid at checkout
         </p>
       </div>
 

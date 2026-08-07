@@ -4,7 +4,10 @@ dist/
 *.log
 .env
 .env.local
+**/.env
+**/.env.local
 client/.env
+server/.env
 server/data/store.json
 server/data/recover-orders.json
 server/uploads/

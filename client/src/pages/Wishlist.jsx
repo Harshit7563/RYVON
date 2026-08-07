@@ -26,7 +26,7 @@ export default function Wishlist() {
     return (
       <div className="mx-auto max-w-lg px-4 py-16 text-center">
         <h1 className="font-display text-2xl font-extrabold uppercase">Wishlist</h1>
-        <p className="mt-2 text-sm text-mute">Save your favourite kicks for later.</p>
+        <p className="mt-2 text-sm text-mute">Save your favourite kicks for later. Login to sync wishlist across devices.</p>
         <Link to="/shop" className="mt-6 inline-flex bg-tss px-6 py-3 text-xs font-bold uppercase text-white">Shop Now</Link>
       </div>
     );

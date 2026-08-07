@@ -2,21 +2,90 @@ import express from "express";
 import cors from "cors";
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
+import bcrypt from "bcryptjs";
+import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 import { products as seedProducts, categories as seedCategories } from "./data/products.js";
+import {
+  createRazorpayOrder,
+  getRazorpayPublic,
+  razorpayConfigured,
+  verifyPaymentSignature,
+  verifyWebhookSignature,
+} from "./razorpay.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, ".env") });
+
 const STORE = path.join(__dirname, "data", "store.json");
 const UPLOADS = path.join(__dirname, "uploads");
 const PORT = process.env.PORT || 5001;
-const ADMIN = {
-  username: "Karan#7563",
-  password: "Karan@7563",
-  pin: "9784",
-  name: "Karan",
-  email: "Karan#7563",
+
+const PREPAID_PCT = Math.min(50, Math.max(0, Number(process.env.PREPAID_DISCOUNT_PERCENT) || 5));
+const SITE = {
+  brand: "RYVON",
+  contactEmail: process.env.CONTACT_EMAIL || "ryvonsupport@gmail.com",
+  contactPhone: String(process.env.CONTACT_PHONE || "").trim(),
+  contactWhatsapp: String(process.env.CONTACT_WHATSAPP || process.env.CONTACT_PHONE || "").replace(/\D/g, ""),
+  socialInstagram: String(process.env.SOCIAL_INSTAGRAM || "").trim(),
+  socialFacebook: String(process.env.SOCIAL_FACEBOOK || "").trim(),
+  upiId: String(process.env.UPI_ID || "").trim(),
+  prepaidPercent: PREPAID_PCT,
 };
-const TOKEN = "ryvon-admin-token";
+
+const ADMIN = {
+  username: process.env.ADMIN_USERNAME || "Karan#7563",
+  password: process.env.ADMIN_PASSWORD || "Karan@7563",
+  passwordHash: process.env.ADMIN_PASSWORD_HASH || "",
+  pin: process.env.ADMIN_PIN || "9784",
+  name: process.env.ADMIN_NAME || "Karan",
+  email: process.env.ADMIN_EMAIL || "Karan#7563",
+};
+const TOKEN = process.env.ADMIN_TOKEN || "ryvon-admin-token";
+
+function isBcryptHash(value) {
+  return typeof value === "string" && /^\$2[aby]?\$/.test(value);
+}
+
+function hashPassword(plain) {
+  return bcrypt.hashSync(String(plain), 10);
+}
+
+function verifyPassword(plain, stored) {
+  if (!stored) return false;
+  if (isBcryptHash(stored)) return bcrypt.compareSync(String(plain), stored);
+  return stored === String(plain);
+}
+
+function verifyAdminPassword(plain) {
+  if (ADMIN.passwordHash) return verifyPassword(plain, ADMIN.passwordHash);
+  return String(plain) === String(ADMIN.password);
+}
+
+function issueUserToken(user) {
+  const token = crypto.randomBytes(24).toString("hex");
+  user.authToken = token;
+  user.authTokenAt = new Date().toISOString();
+  return token;
+}
+
+function isPrepaidMethod(payment) {
+  const p = String(payment || "").toLowerCase();
+  return ["upi", "card", "prepaid", "razorpay", "online"].includes(p);
+}
+
+function normalizeWishlist(ids) {
+  const out = [];
+  const seen = new Set();
+  for (const raw of ids || []) {
+    const id = Number(raw);
+    if (!Number.isFinite(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out.slice(0, 100);
+}
 
 if (!fs.existsSync(UPLOADS)) fs.mkdirSync(UPLOADS, { recursive: true });
 if (!fs.existsSync(path.join(UPLOADS, "products"))) fs.mkdirSync(path.join(UPLOADS, "products"), { recursive: true });
@@ -182,6 +251,18 @@ function ensureStore(s) {
   if (!Array.isArray(s.orders)) s.orders = [];
   if (!Array.isArray(s.messages)) s.messages = [];
   if (!Array.isArray(s.users)) s.users = [];
+  s.users.forEach((u) => {
+    if (!Array.isArray(u.wishlist)) u.wishlist = [];
+  });
+  (s.products || []).forEach((p) => {
+    if (!p || !Array.isArray(p.sizes)) return;
+    if (!p.stock || typeof p.stock !== "object") p.stock = {};
+    p.sizes.forEach((sz) => {
+      const key = String(sz);
+      if (p.stock[key] == null || p.stock[key] === "") p.stock[key] = 10;
+      else p.stock[key] = Math.max(0, Number(p.stock[key]) || 0);
+    });
+  });
   s.nextProductId ||= d.nextProductId;
   s.nextOrderId ||= d.nextOrderId;
   s.nextBannerId ||= d.nextBannerId;
@@ -220,9 +301,15 @@ function publicUser(u) {
     picture: u.picture || null,
     provider: u.provider || "email",
     active: u.active !== false,
+    wishlist: normalizeWishlist(u.wishlist),
     createdAt: u.createdAt,
     lastLoginAt: u.lastLoginAt,
   };
+}
+
+function withAuthToken(user) {
+  const token = issueUserToken(user);
+  return { ...publicUser(user), token };
 }
 
 /** Last 10 digits — compares Indian mobiles fairly. */
@@ -264,7 +351,8 @@ function upsertUser(payload = {}) {
       phone: phoneKey.length >= 10 && !findUserByPhone(phoneRaw) ? phoneRaw : "",
       picture: payload.picture || null,
       provider: payload.provider || "email",
-      password: payload.password ? String(payload.password) : "",
+      password: payload.password ? hashPassword(payload.password) : "",
+      wishlist: normalizeWishlist(payload.wishlist),
       active: true,
       createdAt: now,
       lastLoginAt: now,
@@ -288,12 +376,16 @@ function upsertUser(payload = {}) {
     }
     if (payload.picture) user.picture = payload.picture;
     if (payload.provider && payload.provider !== "order") user.provider = payload.provider;
-    if (payload.password) user.password = String(payload.password);
+    if (payload.password) user.password = hashPassword(payload.password);
+    if (Array.isArray(payload.wishlist)) {
+      user.wishlist = normalizeWishlist([...(user.wishlist || []), ...payload.wishlist]);
+    }
+    if (!Array.isArray(user.wishlist)) user.wishlist = [];
     if (payload.source !== "order") user.lastLoginAt = now;
     if (user.active == null) user.active = true;
   }
   saveStore(store);
-  return { ok: true, user: publicUser(user) };
+  return { ok: true, user };
 }
 
 function normalizeCouponCode(code) {
@@ -350,7 +442,16 @@ app.use((req, res, next) => {
   }
   next();
 });
-app.use(express.json({ limit: "25mb" }));
+app.use(
+  express.json({
+    limit: "25mb",
+    verify: (req, _res, buf) => {
+      if (req.originalUrl?.includes("/payments/razorpay/webhook")) {
+        req.rawBody = buf;
+      }
+    },
+  })
+);
 app.use("/uploads", express.static(UPLOADS));
 app.use("/products", express.static(path.join(__dirname, "../client/public/products")));
 
@@ -360,9 +461,101 @@ function authAdmin(req, res, next) {
   next();
 }
 
+function authUser(req, res, next) {
+  const h = req.headers.authorization || "";
+  const token = h.startsWith("Bearer ") ? h.slice(7).trim() : "";
+  if (!token) return res.status(401).json({ error: "Login required" });
+  const user = store.users.find((u) => u.authToken && u.authToken === token);
+  if (!user || user.active === false) {
+    return res.status(401).json({ error: "Session expired. Please login again." });
+  }
+  req.user = user;
+  next();
+}
+
+function resolveOrderLines(rawItems) {
+  if (!Array.isArray(rawItems) || !rawItems.length) {
+    return { ok: false, error: "Cart is empty" };
+  }
+  const lines = [];
+  for (const raw of rawItems) {
+    const productId = Number(raw.productId ?? raw.id);
+    const product = store.products.find((p) => p.id === productId && p.active !== false);
+    if (!product) {
+      return { ok: false, error: `Product unavailable (id ${productId || "?"})` };
+    }
+    const sizeKey = String(raw.size ?? "");
+    const qty = Math.max(1, Math.min(20, Number(raw.qty) || 1));
+    const sizeOk =
+      (Array.isArray(product.sizes) && product.sizes.map(Number).includes(Number(sizeKey))) ||
+      (product.stock && Object.prototype.hasOwnProperty.call(product.stock, sizeKey));
+    if (!sizeOk) {
+      return { ok: false, error: `${product.name}: size UK ${sizeKey} not available` };
+    }
+    const stockQty = product.stock?.[sizeKey];
+    if (stockQty != null && Number(stockQty) < qty) {
+      return {
+        ok: false,
+        error: `${product.name} (UK ${sizeKey}) only has ${stockQty} left`,
+      };
+    }
+    lines.push({
+      productId: product.id,
+      name: product.name,
+      image: product.image || (product.images && product.images[0]) || "",
+      size: Number(sizeKey) || sizeKey,
+      color: raw.color || "",
+      price: Number(product.price) || 0,
+      qty,
+    });
+  }
+  return { ok: true, lines };
+}
+
+function decrementStock(lines) {
+  for (const line of lines) {
+    const product = store.products.find((p) => p.id === line.productId);
+    if (!product) continue;
+    if (!product.stock || typeof product.stock !== "object") product.stock = {};
+    const key = String(line.size);
+    const current = Number(product.stock[key]);
+    const base = Number.isFinite(current) ? current : 10;
+    product.stock[key] = Math.max(0, base - Number(line.qty));
+  }
+}
+
+function restoreStock(lines) {
+  for (const line of lines || []) {
+    const product = store.products.find((p) => p.id === line.productId);
+    if (!product) continue;
+    if (!product.stock || typeof product.stock !== "object") product.stock = {};
+    const key = String(line.size);
+    const current = Number(product.stock[key]);
+    product.stock[key] = (Number.isFinite(current) ? current : 0) + Number(line.qty || 0);
+  }
+}
+
 function sortBySort(a, b) {
   return (a.sort || 0) - (b.sort || 0);
 }
+
+app.get("/api/site", (_req, res) => {
+  const rzp = getRazorpayPublic();
+  res.json({
+    brand: SITE.brand,
+    contactEmail: SITE.contactEmail,
+    contactPhone: SITE.contactPhone,
+    contactWhatsapp: SITE.contactWhatsapp,
+    socialInstagram: SITE.socialInstagram,
+    socialFacebook: SITE.socialFacebook,
+    upiId: SITE.upiId,
+    prepaidPercent: SITE.prepaidPercent,
+    guestCheckout: true,
+    razorpayEnabled: rzp.enabled,
+    razorpayKeyId: rzp.keyId,
+    razorpayMethods: rzp.methods,
+  });
+});
 
 app.get("/api/health", (_req, res) =>
   res.json({
@@ -480,38 +673,86 @@ app.post("/api/coupons/validate", (req, res) => {
   });
 });
 
-app.post("/api/orders", (req, res) => {
+app.post("/api/orders", async (req, res) => {
   const { items, customer, payment, shipping, couponCode } = req.body || {};
-  if (!items?.length || !customer?.name || !customer?.phone || !customer?.address) {
+  if (!customer?.name || !customer?.phone || !customer?.address) {
     return res.status(400).json({ error: "Missing order details" });
   }
+  const email = String(customer.email || "").trim().toLowerCase();
+  if (!email.includes("@")) {
+    return res.status(400).json({ error: "Valid email required for order confirmation" });
+  }
+  if (!String(customer.city || "").trim() || !String(customer.state || "").trim()) {
+    return res.status(400).json({ error: "City and state are required" });
+  }
+  const pin = String(customer.pincode || "").trim();
+  if (!/^\d{6}$/.test(pin)) {
+    return res.status(400).json({ error: "Valid 6-digit pincode required" });
+  }
+
   reloadStore();
-  const subtotal = items.reduce((s, i) => s + Number(i.price) * Number(i.qty), 0);
-  const ship = shipping ?? (subtotal >= 999 ? 0 : 79);
-  let discount = 0;
+  const resolved = resolveOrderLines(items);
+  if (!resolved.ok) return res.status(400).json({ error: resolved.error });
+  const lines = resolved.lines;
+
+  const subtotal = lines.reduce((s, i) => s + Number(i.price) * Number(i.qty), 0);
+  const ship = shipping != null ? Number(shipping) : subtotal >= 999 ? 0 : 79;
+  const shipFinal = subtotal >= 999 ? 0 : Number.isFinite(ship) ? Math.max(0, ship) : 79;
+
+  let couponDiscount = 0;
   let appliedCode = null;
   let appliedCouponId = null;
   if (couponCode) {
     const result = evaluateCoupon(couponCode, subtotal);
     if (!result.ok) return res.status(400).json({ error: result.error });
-    discount = result.discount;
+    couponDiscount = result.discount;
     appliedCode = result.coupon.code;
     appliedCouponId = result.coupon.id;
   }
-  const email = String(customer.email || "").trim().toLowerCase();
+
+  let payMethod = String(payment || "cod").toLowerCase();
+  if (["upi", "card", "online", "prepaid"].includes(payMethod)) payMethod = "razorpay";
+  const wantsOnline = payMethod === "razorpay";
+  if (wantsOnline && !razorpayConfigured()) {
+    return res.status(503).json({
+      error: "Online payments are not configured yet. Please use Cash on Delivery or try again later.",
+    });
+  }
+
+  const prepaid = isPrepaidMethod(payMethod);
+  const prepaidDiscount = prepaid ? Math.round((subtotal * SITE.prepaidPercent) / 100) : 0;
+  const discount = Math.max(0, Math.min(subtotal, couponDiscount + prepaidDiscount));
+  const total = Math.max(0, subtotal - discount) + shipFinal;
+
+  for (const line of lines) {
+    const product = store.products.find((p) => p.id === line.productId);
+    const key = String(line.size);
+    const left = product?.stock?.[key];
+    if (left != null && Number(left) < line.qty) {
+      return res.status(400).json({
+        error: `${product.name} (UK ${key}) only has ${left} left`,
+      });
+    }
+  }
+
+  decrementStock(lines);
+
   const order = {
     id: store.nextOrderId++,
     code: `RYV${Date.now().toString().slice(-8)}`,
-    status: "placed",
-    payment: payment || "cod",
-    customer: { ...customer, email },
+    status: wantsOnline ? "pending_payment" : "placed",
+    payment: wantsOnline ? "razorpay" : payMethod || "cod",
+    paymentStatus: wantsOnline ? "pending" : "cod",
+    customer: { ...customer, email, pincode: pin },
     userEmail: email,
-    items,
+    items: lines,
     subtotal,
-    shipping: ship,
+    shipping: shipFinal,
     discount,
+    couponDiscount,
+    prepaidDiscount,
     couponCode: appliedCode,
-    total: Math.max(0, subtotal - discount) + ship,
+    total,
     createdAt: new Date().toISOString(),
   };
   if (appliedCouponId != null) {
@@ -519,17 +760,235 @@ app.post("/api/orders", (req, res) => {
     if (c) c.usedCount = Number(c.usedCount || 0) + 1;
   }
   store.orders.unshift(order);
-  if (email) {
-    upsertUser({
-      email,
-      name: customer.name,
-      phone: customer.phone,
-      provider: "order",
-      source: "order",
-    });
+  upsertUser({
+    email,
+    name: customer.name,
+    phone: customer.phone,
+    provider: "order",
+    source: "order",
+  });
+
+  if (!wantsOnline) {
+    saveStore(store);
+    return res.status(201).json(order);
   }
+
+  try {
+    const amountPaise = Math.round(Number(order.total) * 100);
+    const rzpOrder = await createRazorpayOrder({
+      amountPaise,
+      receipt: order.code,
+      notes: {
+        orderCode: order.code,
+        email,
+        phone: String(customer.phone || ""),
+      },
+    });
+    order.razorpayOrderId = rzpOrder.id;
+    order.razorpayAmount = amountPaise;
+    saveStore(store);
+    const pub = getRazorpayPublic();
+    return res.status(201).json({
+      ...order,
+      razorpay: {
+        keyId: pub.keyId,
+        orderId: rzpOrder.id,
+        amount: amountPaise,
+        currency: "INR",
+        name: "RYVON",
+        description: `Order ${order.code}`,
+        prefill: {
+          name: order.customer.name,
+          email: order.customer.email,
+          contact: String(order.customer.phone || "").replace(/\D/g, "").slice(-10),
+        },
+      },
+    });
+  } catch (err) {
+    console.error("[razorpay create]", err?.message || err);
+    restoreStock(lines);
+    store.orders = store.orders.filter((o) => o.code !== order.code);
+    saveStore(store);
+    return res.status(502).json({ error: err.message || "Could not start online payment" });
+  }
+});
+
+function markOrderPaid(order, paymentMeta = {}) {
+  if (!order) return;
+  if (order.paymentStatus === "paid") return order;
+  order.status = "placed";
+  order.paymentStatus = "paid";
+  order.payment = "razorpay";
+  order.paidAt = new Date().toISOString();
+  if (paymentMeta.razorpayPaymentId) order.razorpayPaymentId = paymentMeta.razorpayPaymentId;
+  if (paymentMeta.razorpayOrderId) order.razorpayOrderId = paymentMeta.razorpayOrderId;
+  if (paymentMeta.method) order.razorpayMethod = paymentMeta.method;
+  return order;
+}
+
+app.post("/api/payments/razorpay/verify", (req, res) => {
+  const {
+    orderCode,
+    razorpay_order_id: razorpayOrderId,
+    razorpay_payment_id: razorpayPaymentId,
+    razorpay_signature: razorpaySignature,
+  } = req.body || {};
+
+  if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+    return res.status(400).json({ error: "Missing payment verification fields" });
+  }
+
+  const ok = verifyPaymentSignature({
+    orderId: razorpayOrderId,
+    paymentId: razorpayPaymentId,
+    signature: razorpaySignature,
+  });
+  if (!ok) return res.status(400).json({ error: "Invalid payment signature" });
+
+  reloadStore();
+  let order = null;
+  if (orderCode) {
+    order = store.orders.find((o) => o.code === orderCode);
+    if (!order) return res.status(404).json({ error: "Order not found" });
+    if (order.razorpayOrderId && order.razorpayOrderId !== razorpayOrderId) {
+      return res.status(400).json({ error: "Razorpay order mismatch" });
+    }
+  } else {
+    order = store.orders.find((o) => o.razorpayOrderId === razorpayOrderId);
+  }
+
+  if (order) {
+    markOrderPaid(order, { razorpayOrderId, razorpayPaymentId });
+    saveStore(store);
+    return res.json({ success: true, verified: true, order });
+  }
+
+  res.json({ success: true, verified: true });
+});
+
+/** Spec alias: POST /api/create-order — { amount (paise), currency?, receipt? } */
+app.post("/api/create-order", async (req, res) => {
+  try {
+    if (!razorpayConfigured()) {
+      return res.status(503).json({ error: "Razorpay is not configured" });
+    }
+    const amount = Math.round(Number(req.body?.amount));
+    const currency = String(req.body?.currency || "INR").toUpperCase();
+    const receipt = String(req.body?.receipt || `rcpt_${Date.now()}`).slice(0, 40);
+    if (!Number.isFinite(amount) || amount < 100) {
+      return res.status(400).json({ error: "Amount must be at least 100 paise" });
+    }
+    const rzpOrder = await createRazorpayOrder({
+      amountPaise: amount,
+      currency,
+      receipt,
+      notes: req.body?.notes || {},
+    });
+    const pub = getRazorpayPublic();
+    res.status(201).json({
+      order_id: rzpOrder.id,
+      amount: rzpOrder.amount,
+      currency: rzpOrder.currency,
+      key_id: pub.keyId,
+      receipt: rzpOrder.receipt,
+    });
+  } catch (err) {
+    const status = err.status || 500;
+    if (status === 401) return res.status(401).json({ error: err.message || "Razorpay auth failed" });
+    if (status === 400) return res.status(400).json({ error: err.message });
+    console.error("[create-order]", err.message);
+    res.status(500).json({ error: err.message || "Could not create Razorpay order" });
+  }
+});
+
+/** Spec alias: POST /api/verify-payment */
+app.post("/api/verify-payment", (req, res) => {
+  const razorpayOrderId = req.body?.razorpay_order_id || req.body?.order_id;
+  const razorpayPaymentId = req.body?.razorpay_payment_id || req.body?.payment_id;
+  const razorpaySignature = req.body?.razorpay_signature || req.body?.signature;
+  const orderCode = req.body?.orderCode || req.body?.order_code;
+
+  if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+    return res.status(400).json({ error: "Missing razorpay_order_id, razorpay_payment_id or razorpay_signature" });
+  }
+
+  const ok = verifyPaymentSignature({
+    orderId: razorpayOrderId,
+    paymentId: razorpayPaymentId,
+    signature: razorpaySignature,
+  });
+  if (!ok) {
+    return res.status(400).json({ success: false, error: "Invalid payment signature" });
+  }
+
+  reloadStore();
+  let order = null;
+  if (orderCode) order = store.orders.find((o) => o.code === orderCode);
+  if (!order) order = store.orders.find((o) => o.razorpayOrderId === razorpayOrderId);
+  if (order) {
+    markOrderPaid(order, { razorpayOrderId, razorpayPaymentId });
+    saveStore(store);
+  }
+
+  res.json({
+    success: true,
+    verified: true,
+    order_id: razorpayOrderId,
+    payment_id: razorpayPaymentId,
+    order: order || undefined,
+  });
+});
+
+app.post("/api/payments/razorpay/cancel", (req, res) => {
+  const { orderCode } = req.body || {};
+  if (!orderCode) return res.status(400).json({ error: "Order code required" });
+  reloadStore();
+  const order = store.orders.find((o) => o.code === orderCode);
+  if (!order) return res.status(404).json({ error: "Order not found" });
+  if (order.paymentStatus === "paid") {
+    return res.status(400).json({ error: "Paid order cannot be cancelled this way" });
+  }
+  if (order.status !== "pending_payment") {
+    return res.status(400).json({ error: "Order is not awaiting payment" });
+  }
+  restoreStock(order.items);
+  order.status = "cancelled";
+  order.paymentStatus = "cancelled";
+  order.cancelledAt = new Date().toISOString();
   saveStore(store);
-  res.status(201).json(order);
+  res.json({ ok: true, order });
+});
+
+app.post("/api/payments/razorpay/webhook", (req, res) => {
+  try {
+    const signature = req.headers["x-razorpay-signature"];
+    const raw = req.rawBody || Buffer.from(JSON.stringify(req.body || {}));
+    if (!verifyWebhookSignature(raw, signature)) {
+      return res.status(400).json({ error: "Invalid webhook signature" });
+    }
+    const payload = typeof req.body === "object" && req.body ? req.body : JSON.parse(raw.toString("utf8"));
+    const event = payload?.event;
+    const paymentEntity = payload?.payload?.payment?.entity;
+    if (event === "payment.captured" && paymentEntity) {
+      reloadStore();
+      const rzpOrderId = paymentEntity.order_id;
+      const order =
+        store.orders.find((o) => o.razorpayOrderId === rzpOrderId) ||
+        store.orders.find((o) => o.code === paymentEntity.notes?.orderCode);
+      if (order && order.paymentStatus !== "paid") {
+        markOrderPaid(order, {
+          razorpayOrderId: rzpOrderId,
+          razorpayPaymentId: paymentEntity.id,
+          method: paymentEntity.method,
+        });
+        saveStore(store);
+      }
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[razorpay webhook]", err.message);
+    res.status(500).json({ error: "Webhook failed" });
+  }
 });
 
 app.get("/api/my-orders", (req, res) => {
@@ -587,9 +1046,24 @@ app.post("/api/auth/register", (req, res) => {
   if (findUserByPhone(phone)) {
     return res.status(400).json({ error: "Phone number already registered. Please login." });
   }
-  const result = upsertUser({ name, email, phone, password, provider: "email", source: "register" });
+  const result = upsertUser({
+    name,
+    email,
+    phone,
+    password,
+    wishlist: b.wishlist,
+    provider: "email",
+    source: "register",
+  });
   if (!result.ok) return res.status(400).json({ error: result.error });
-  res.status(201).json(result.user);
+  res.status(201).json(withAuthToken(result.user));
+  setImmediate(() => {
+    try {
+      saveStore(store);
+    } catch (err) {
+      console.error("[auth/register save]", err.message);
+    }
+  });
 });
 
 app.post("/api/auth/login", (req, res) => {
@@ -598,20 +1072,30 @@ app.post("/api/auth/login", (req, res) => {
   const password = String(b.password || "");
   if (!email.includes("@")) return res.status(400).json({ error: "Valid email required" });
   if (password.length < 4) return res.status(400).json({ error: "Password must be at least 4 characters" });
-  let user = store.users.find((u) => u.email === email);
+  const user = store.users.find((u) => u.email === email);
   if (!user) {
     return res.status(404).json({ error: "No account with this email. Please register." });
-  }
-  if (user.password && user.password !== password) {
-    return res.status(401).json({ error: "Incorrect password" });
   }
   if (user.active === false) {
     return res.status(403).json({ error: "This account is disabled. Contact support." });
   }
-  if (!user.password && password) user.password = password;
+  if (!user.password) {
+    return res.status(401).json({ error: "This account uses Google sign-in. Continue with Google." });
+  }
+  if (!verifyPassword(password, user.password)) {
+    return res.status(401).json({ error: "Incorrect password" });
+  }
+  // Migrate legacy plaintext passwords to bcrypt
+  if (!isBcryptHash(user.password)) {
+    user.password = hashPassword(password);
+  }
+  if (Array.isArray(b.wishlist) && b.wishlist.length) {
+    user.wishlist = normalizeWishlist([...(user.wishlist || []), ...b.wishlist]);
+  }
+  if (!Array.isArray(user.wishlist)) user.wishlist = [];
   user.lastLoginAt = new Date().toISOString();
-  // Respond first — sync disk write made login feel slow on larger stores.
-  res.json(publicUser(user));
+  const payload = withAuthToken(user);
+  res.json(payload);
   setImmediate(() => {
     try {
       saveStore(store);
@@ -634,21 +1118,42 @@ app.post("/api/auth/google", (req, res) => {
     name: b.name,
     picture: b.picture,
     phone: b.phone,
+    wishlist: b.wishlist,
     provider: "google",
     source: "google",
   });
   if (!result.ok) return res.status(400).json({ error: result.error });
-  res.json(result.user);
+  const payload = withAuthToken(result.user);
+  res.json(payload);
+  setImmediate(() => {
+    try {
+      saveStore(store);
+    } catch (err) {
+      console.error("[auth/google save]", err.message);
+    }
+  });
+});
+
+app.get("/api/me/wishlist", authUser, (req, res) => {
+  if (!Array.isArray(req.user.wishlist)) req.user.wishlist = [];
+  res.json({ ids: normalizeWishlist(req.user.wishlist) });
+});
+
+app.put("/api/me/wishlist", authUser, (req, res) => {
+  const ids = normalizeWishlist(req.body?.ids);
+  req.user.wishlist = ids;
+  saveStore(store);
+  res.json({ ids });
 });
 
 /* ——— Admin ——— */
 app.post("/api/admin/login", (req, res) => {
   const { email, username, password, pin } = req.body || {};
   const user = String(username || email || "").trim();
-  if (String(pin || "").trim() !== ADMIN.pin) {
+  if (String(pin || "").trim() !== String(ADMIN.pin)) {
     return res.status(401).json({ error: "Invalid PIN" });
   }
-  if (user === ADMIN.username && password === ADMIN.password) {
+  if (user === ADMIN.username && verifyAdminPassword(password)) {
     return res.json({ token: TOKEN, admin: { name: ADMIN.name, email: ADMIN.email } });
   }
   res.status(401).json({ error: "Invalid credentials" });
@@ -705,8 +1210,11 @@ app.post("/api/admin/upload", authAdmin, (req, res) => {
 
 app.get("/api/admin/stats", authAdmin, (_req, res) => {
   reloadStore();
-  const revenue = store.orders.reduce((s, o) => s + (o.status !== "cancelled" ? o.total : 0), 0);
-  const openOrders = store.orders.filter((o) => o.status === "placed").length;
+  const revenue = store.orders.reduce(
+    (s, o) => s + (o.status !== "cancelled" && o.status !== "pending_payment" ? o.total : 0),
+    0
+  );
+  const openOrders = store.orders.filter((o) => o.status === "placed" || o.status === "pending_payment").length;
   const unreadMessages = store.messages.filter((m) => !m.read).length;
   res.json({
     products: store.products.length,
@@ -1025,7 +1533,11 @@ app.patch("/api/admin/orders/:id", authAdmin, (req, res) => {
   reloadStore();
   const o = store.orders.find((x) => x.id === Number(req.params.id));
   if (!o) return res.status(404).json({ error: "Not found" });
+  const prev = o.status;
   if (req.body?.status) o.status = req.body.status;
+  if (prev !== "cancelled" && o.status === "cancelled") {
+    restoreStock(o.items);
+  }
   saveStore(store);
   res.json(o);
 });

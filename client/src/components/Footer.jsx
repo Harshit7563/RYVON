@@ -7,7 +7,6 @@ const COLS = [
     links: [
       ["About Us", "/about"],
       ["Contact Us", "/contact"],
-      ["Stores Near Me", "/contact"],
       ["Track Order", "/track"],
       ["Wishlist", "/wishlist"],
       ["My Account", "/account"],

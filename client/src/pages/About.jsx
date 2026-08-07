@@ -15,9 +15,9 @@ export default function About() {
 
       <div className="mt-8 grid gap-4 sm:grid-cols-3">
         {[
-          ["50K+", "Happy feet"],
-          ["Pan-India", "Delivery"],
           ["7 Day", "Easy returns"],
+          ["Pan-India", "Delivery"],
+          ["Guest", "Checkout ok"],
         ].map(([n, l]) => (
           <div key={l} className="border border-line p-4 text-center">
             <p className="font-display text-2xl font-extrabold text-tss">{n}</p>
@@ -37,8 +37,8 @@ export default function About() {
           for daily comfort, not just photoshoot gloss.
         </li>
         <li>
-          <strong className="text-ink">Fair pricing</strong> — premium look without luxury markups; prepaid
-          extras and free shipping thresholds that actually help.
+          <strong className="text-ink">Fair pricing</strong> — clear MRPs, prepaid extra 5% off at checkout,
+          and free shipping thresholds that actually apply.
         </li>
         <li>
           <strong className="text-ink">Customer-first service</strong> — transparent shipping, 7-day returns on

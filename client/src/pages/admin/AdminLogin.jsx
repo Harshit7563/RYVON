@@ -2,37 +2,23 @@ import { useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { adminLogin } from "../../api";
 
-const ADMIN_PIN = "9784";
-
 export default function AdminLogin() {
   const nav = useNavigate();
   const existing = localStorage.getItem("ryvon-admin-token");
-  const [step, setStep] = useState("pin"); // pin | login
-  const [pin, setPin] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [pin, setPin] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   if (existing) return <Navigate to="/admin" replace />;
-
-  const submitPin = (e) => {
-    e.preventDefault();
-    setError("");
-    if (pin.trim() !== ADMIN_PIN) {
-      setError("Invalid PIN");
-      return;
-    }
-    setStep("login");
-    setError("");
-  };
 
   const submitLogin = async (e) => {
     e.preventDefault();
     setError("");
     setBusy(true);
     try {
-      const data = await adminLogin(username, password, pin.trim() || ADMIN_PIN);
+      const data = await adminLogin(username, password, pin.trim());
       localStorage.setItem("ryvon-admin-token", data.token);
       localStorage.setItem("ryvon-admin", JSON.stringify(data.admin));
       nav("/admin", { replace: true });
@@ -48,75 +34,53 @@ export default function AdminLogin() {
       <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="bg-tss px-6 py-5 text-white">
           <p className="font-display text-2xl font-extrabold">RYVON Admin</p>
-          <p className="mt-1 text-sm text-white/80">
-            {step === "pin" ? "Enter access PIN to continue" : "Sign in with admin credentials"}
-          </p>
+          <p className="mt-1 text-sm text-white/80">Sign in with admin credentials</p>
         </div>
 
-        {step === "pin" ? (
-          <form onSubmit={submitPin} className="space-y-3 p-6">
-            <label className="block">
-              <span className="mb-1 block text-[11px] font-bold uppercase text-mute">PIN</span>
-              <input
-                type="password"
-                inputMode="numeric"
-                required
-                maxLength={8}
-                value={pin}
-                onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 8))}
-                placeholder="••••"
-                autoComplete="one-time-code"
-                className="w-full border border-line px-3 py-3 text-center text-lg font-bold tracking-[0.35em] outline-none focus:border-tss"
-              />
-            </label>
-            {error && <p className="text-xs font-semibold text-tss">{error}</p>}
-            <button type="submit" className="w-full bg-tss py-3.5 text-xs font-bold uppercase text-white">
-              Unlock
-            </button>
-          </form>
-        ) : (
-          <form onSubmit={submitLogin} className="space-y-3 p-6">
-            <label className="block">
-              <span className="mb-1 block text-[11px] font-bold uppercase text-mute">User</span>
-              <input
-                type="text"
-                required
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Admin username"
-                autoComplete="username"
-                className="w-full border border-line px-3 py-3 text-sm outline-none focus:border-tss"
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-[11px] font-bold uppercase text-mute">Password</span>
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Password"
-                autoComplete="current-password"
-                className="w-full border border-line px-3 py-3 text-sm outline-none focus:border-tss"
-              />
-            </label>
-            {error && <p className="text-xs font-semibold text-tss">{error}</p>}
-            <button type="submit" disabled={busy} className="w-full bg-tss py-3.5 text-xs font-bold uppercase text-white disabled:opacity-60">
-              {busy ? "Signing in…" : "Login to Admin"}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setStep("pin");
-                setError("");
-                setPassword("");
-              }}
-              className="w-full text-[11px] font-bold uppercase text-mute underline"
-            >
-              Back to PIN
-            </button>
-          </form>
-        )}
+        <form onSubmit={submitLogin} className="space-y-3 p-6">
+          <label className="block">
+            <span className="mb-1 block text-[11px] font-bold uppercase text-mute">PIN</span>
+            <input
+              type="password"
+              inputMode="numeric"
+              required
+              maxLength={8}
+              value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 8))}
+              placeholder="••••"
+              autoComplete="one-time-code"
+              className="w-full border border-line px-3 py-3 text-center text-lg font-bold tracking-[0.35em] outline-none focus:border-tss"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[11px] font-bold uppercase text-mute">User</span>
+            <input
+              type="text"
+              required
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Admin username"
+              autoComplete="username"
+              className="w-full border border-line px-3 py-3 text-sm outline-none focus:border-tss"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[11px] font-bold uppercase text-mute">Password</span>
+            <input
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Password"
+              autoComplete="current-password"
+              className="w-full border border-line px-3 py-3 text-sm outline-none focus:border-tss"
+            />
+          </label>
+          {error && <p className="text-xs font-semibold text-tss">{error}</p>}
+          <button type="submit" disabled={busy} className="w-full bg-tss py-3.5 text-xs font-bold uppercase text-white disabled:opacity-60">
+            {busy ? "Signing in…" : "Login to Admin"}
+          </button>
+        </form>
       </div>
     </div>
   );

@@ -110,7 +110,7 @@ const PAGES = {
         items: [
           {
             q: "Do I need an account to order?",
-            a: "You can checkout as a guest. Creating an account helps you track orders faster, save wishlist items, and manage your profile.",
+            a: "Yes. You can checkout as a guest with name, email, phone and address. Creating an account helps you track orders faster, sync wishlist across devices, and manage your profile.",
           },
           {
             q: "How is my data used?",

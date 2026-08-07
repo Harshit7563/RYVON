@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { getProduct, getRelated, inr, mediaUrl } from "../api";
 import { useCart } from "../context/CartContext";
-import { useAuth } from "../context/AuthContext";
 import { useWishlist } from "../context/WishlistContext";
 import { SIZE_CHART } from "../data/sizeChart";
 import ProductCard from "../components/ProductCard";
@@ -46,7 +45,6 @@ export default function Product() {
   const { id } = useParams();
   const nav = useNavigate();
   const { add } = useCart();
-  const { user, openLogin } = useAuth();
   const { has, toggle } = useWishlist();
 
   const [product, setProduct] = useState(null);
@@ -87,13 +85,7 @@ export default function Product() {
     for (let i = 0; i < qty; i++) add(product, size, picked?.hex || "#111111");
     setAdded(true);
     setTimeout(() => setAdded(false), 1600);
-    if (goCheckout) {
-      if (!user) {
-        openLogin();
-        return;
-      }
-      nav("/cart");
-    }
+    if (goCheckout) nav("/checkout");
   };
 
   if (loading) {
@@ -201,7 +193,7 @@ export default function Product() {
               </>
             )}
           </div>
-          <p className="mt-1 text-[12px] text-mute">Inclusive of all taxes · Extra 5% off on prepaid</p>
+          <p className="mt-1 text-[12px] text-mute">Inclusive of all taxes · Extra 5% off on prepaid (UPI / card)</p>
 
           {/* Colors */}
           <div className="mt-5">

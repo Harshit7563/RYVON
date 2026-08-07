@@ -58,10 +58,31 @@ export const lookupPincode = (pin) => req(`/pincode/${pin}`);
 export const validateCoupon = (code, subtotal) =>
   req("/coupons/validate", { method: "POST", body: JSON.stringify({ code, subtotal }) });
 export const sendContact = (body) => req("/contact", { method: "POST", body: JSON.stringify(body) });
+export const getSite = () => req("/site");
+
+export const verifyRazorpayPayment = (body) =>
+  req("/payments/razorpay/verify", { method: "POST", body: JSON.stringify(body) });
+export const cancelRazorpayPayment = (orderCode) =>
+  req("/payments/razorpay/cancel", { method: "POST", body: JSON.stringify({ orderCode }) });
+
+/** Spec helpers */
+export const createRazorpayOrderApi = (body) =>
+  req("/create-order", { method: "POST", body: JSON.stringify(body) });
+export const verifyPaymentApi = (body) =>
+  req("/verify-payment", { method: "POST", body: JSON.stringify(body) });
 
 export const authRegister = (body) => req("/auth/register", { method: "POST", body: JSON.stringify(body) });
 export const authLogin = (body) => req("/auth/login", { method: "POST", body: JSON.stringify(body) });
 export const authGoogle = (body) => req("/auth/google", { method: "POST", body: JSON.stringify(body) });
+
+export const fetchWishlist = (token) =>
+  req("/me/wishlist", { headers: { Authorization: `Bearer ${token}` } });
+export const saveWishlist = (token, ids) =>
+  req("/me/wishlist", {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ ids }),
+  });
 
 export const adminLogin = (username, password, pin) =>
   req("/admin/login", {
