@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Navigate, Outlet, NavLink, useLocation, useNavigate } from "react-router-dom";
-import { adminStats } from "../../api";
+import { adminOrders, adminStats } from "../../api";
+import {
+  baselineOrders,
+  ensureNotificationPermission,
+  notificationsSupported,
+  notifyNewOrders,
+  notifyPrefEnabled,
+  setNotifyPref,
+} from "../../adminNotifications";
 
 function useAdminAuth() {
   const token = localStorage.getItem("ryvon-admin-token");
@@ -69,7 +77,13 @@ export default function AdminLayout() {
   const location = useLocation();
   const [badges, setBadges] = useState({});
   const [seenTick, setSeenTick] = useState(0);
+  const [notifyOn, setNotifyOn] = useState(() => notifyPrefEnabled());
+  const [notifyState, setNotifyState] = useState(() =>
+    notificationsSupported() ? Notification.permission : "unsupported"
+  );
+  const [toast, setToast] = useState(null);
   const badgesRef = useRef(badges);
+  const primedRef = useRef(false);
   badgesRef.current = badges;
 
   useEffect(() => {
@@ -77,7 +91,6 @@ export default function AdminLayout() {
       adminStats()
         .then((s) => {
           const b = s.badges || {};
-          // First load: baseline growth badges so we only show *new* later.
           const seen = readSeen();
           let changed = false;
           for (const key of ["products", "categories", "banners", "coupons", "users"]) {
@@ -95,14 +108,65 @@ export default function AdminLayout() {
     return () => clearInterval(t);
   }, []);
 
-  // Acknowledge section when opened so growth badges clear.
+  useEffect(() => {
+    if (!notifyOn || !notificationsSupported()) return;
+    if (Notification.permission === "default") {
+      ensureNotificationPermission().then(setNotifyState).catch(() => {});
+    }
+  }, [notifyOn]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const pollWithToast = async () => {
+      if (!notifyPrefEnabled()) return;
+      try {
+        const data = await adminOrders();
+        if (cancelled) return;
+        const list = Array.isArray(data) ? data : [];
+        if (!primedRef.current) {
+          baselineOrders(list);
+          primedRef.current = true;
+          return;
+        }
+        const prev = Number(localStorage.getItem("ryvon-admin-last-order-id") || 0);
+        const fresh = list
+          .filter((o) => (Number(o.id) || 0) > prev)
+          .sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+        if (fresh.length === 0) return;
+        const newest = fresh[fresh.length - 1];
+        notifyNewOrders(list, { onClick: () => nav("/admin/orders") });
+        setToast({
+          code: newest.code,
+          name: newest.customer?.name || "Customer",
+          total: newest.total,
+          count: fresh.length,
+        });
+      } catch {
+        /* ignore */
+      }
+    };
+
+    pollWithToast();
+    const t = setInterval(pollWithToast, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [nav, notifyOn]);
+
+  useEffect(() => {
+    if (!toast) return undefined;
+    const t = setTimeout(() => setToast(null), 8000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
   useEffect(() => {
     const item = NAV.find((n) =>
       n.end ? location.pathname === n.to : location.pathname.startsWith(n.to)
     );
     if (!item?.badge) return;
     if (item.badge === "orders" || item.badge === "messages" || item.badge === "dashboard") {
-      // actionable badges stay live; no local ack needed
       return;
     }
     markSeen(item.badge, Number(badgesRef.current[item.badge]) || 0);
@@ -128,6 +192,24 @@ export default function AdminLayout() {
     return freshCount(key, badges[key]);
   };
 
+  const toggleNotify = async () => {
+    if (!notificationsSupported()) {
+      setNotifyState("unsupported");
+      return;
+    }
+    if (!notifyOn) {
+      const perm = await ensureNotificationPermission();
+      setNotifyState(perm);
+      setNotifyPref(true);
+      setNotifyOn(true);
+      primedRef.current = false;
+    } else {
+      setNotifyPref(false);
+      setNotifyOn(false);
+      setToast(null);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#f3f4f6]">
       <header className="border-b border-line bg-white">
@@ -137,6 +219,22 @@ export default function AdminLayout() {
             <span className="rounded bg-ink px-2 py-0.5 text-[10px] font-bold uppercase text-white">Admin</span>
           </div>
           <div className="flex items-center gap-3 text-sm">
+            {notificationsSupported() && (
+              <button
+                type="button"
+                onClick={toggleNotify}
+                className={`hidden rounded-lg border px-2.5 py-1 text-[10px] font-bold uppercase sm:inline ${
+                  notifyOn ? "border-off/40 bg-off/10 text-off" : "border-line text-mute"
+                }`}
+                title={
+                  notifyState === "denied"
+                    ? "Browser blocked notifications — enable in site settings"
+                    : "Toggle order push notifications"
+                }
+              >
+                {notifyOn ? "Alerts On" : "Alerts Off"}
+              </button>
+            )}
             <span className="hidden text-mute sm:inline">{admin?.email}</span>
             <a href="/" className="font-semibold text-mute hover:text-tss">
               View store
@@ -147,6 +245,26 @@ export default function AdminLayout() {
           </div>
         </div>
       </header>
+
+      {toast && (
+        <button
+          type="button"
+          onClick={() => {
+            setToast(null);
+            nav("/admin/orders");
+          }}
+          className="fixed bottom-4 right-4 z-50 max-w-sm rounded-xl border border-tss/30 bg-white p-4 text-left shadow-lg"
+        >
+          <p className="text-[10px] font-bold uppercase tracking-wide text-tss">New order</p>
+          <p className="mt-1 font-display text-lg font-extrabold">
+            {toast.count > 1 ? `${toast.count} new · ${toast.code}` : toast.code}
+          </p>
+          <p className="text-sm text-mute">
+            {toast.name} · ₹{Math.round(Number(toast.total) || 0)}
+          </p>
+          <p className="mt-2 text-[11px] font-bold uppercase text-ink">Open orders →</p>
+        </button>
+      )}
 
       <div className="mx-auto grid max-w-6xl gap-6 px-4 py-6 lg:grid-cols-[220px_1fr]">
         <aside className="h-fit rounded-xl border border-line bg-white p-3">

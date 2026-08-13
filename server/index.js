@@ -815,10 +815,13 @@ app.post("/api/orders", async (req, res) => {
 
 function markOrderPaid(order, paymentMeta = {}) {
   if (!order) return;
-  if (order.paymentStatus === "paid") return order;
+  if (order.paymentStatus === "paid") {
+    if (order.payment === "razorpay") order.payment = "paid";
+    return order;
+  }
   order.status = "placed";
   order.paymentStatus = "paid";
-  order.payment = "razorpay";
+  order.payment = "paid";
   order.paidAt = new Date().toISOString();
   if (paymentMeta.razorpayPaymentId) order.razorpayPaymentId = paymentMeta.razorpayPaymentId;
   if (paymentMeta.razorpayOrderId) order.razorpayOrderId = paymentMeta.razorpayOrderId;
@@ -1587,7 +1590,16 @@ app.delete("/api/admin/banners/:id", authAdmin, (req, res) => {
 
 app.get("/api/admin/orders", authAdmin, (_req, res) => {
   reloadStore();
-  res.json(Array.isArray(store.orders) ? store.orders : []);
+  const list = Array.isArray(store.orders) ? store.orders : [];
+  let dirty = false;
+  for (const o of list) {
+    if (o?.paymentStatus === "paid" && o.payment === "razorpay") {
+      o.payment = "paid";
+      dirty = true;
+    }
+  }
+  if (dirty) saveStore(store);
+  res.json(list);
 });
 
 app.patch("/api/admin/orders/:id", authAdmin, (req, res) => {

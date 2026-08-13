@@ -1,7 +1,27 @@
 import { useEffect, useState } from "react";
-import { adminOrders, adminUpdateOrder, inr } from "../../api";
+import { adminOrders, adminUpdateOrder, inr, mediaUrl } from "../../api";
 
-const STATUSES = ["placed", "confirmed", "shipped", "delivered", "cancelled"];
+const STATUSES = ["pending_payment", "placed", "confirmed", "shipped", "delivered", "cancelled"];
+
+function paymentLabel(o) {
+  const status = String(o?.paymentStatus || "").toLowerCase();
+  const method = String(o?.payment || "").toLowerCase();
+  if (status === "paid" || method === "paid") return "Paid";
+  if (o?.status === "pending_payment" || status === "pending") return "Pending";
+  if (status === "cancelled" || o?.status === "cancelled") return "Cancelled";
+  if (method === "cod" || status === "cod") return "COD";
+  if (method === "razorpay") return status === "paid" ? "Paid" : "Pending";
+  return o?.payment || "—";
+}
+
+function Row({ label, children }) {
+  return (
+    <div className="flex flex-wrap justify-between gap-2 border-b border-line/70 py-2 text-sm last:border-0">
+      <span className="text-mute">{label}</span>
+      <span className="max-w-[70%] text-right font-semibold text-ink">{children}</span>
+    </div>
+  );
+}
 
 export default function AdminOrders() {
   const [orders, setOrders] = useState([]);
@@ -9,6 +29,7 @@ export default function AdminOrders() {
   const [filter, setFilter] = useState("all");
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
+  const [view, setView] = useState(null);
 
   const load = async () => {
     setBusy(true);
@@ -28,10 +49,22 @@ export default function AdminOrders() {
     load();
   }, []);
 
+  useEffect(() => {
+    if (!view) return undefined;
+    const onKey = (e) => {
+      if (e.key === "Escape") setView(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [view]);
+
   const update = async (id, status) => {
     try {
-      await adminUpdateOrder(id, status);
+      const updated = await adminUpdateOrder(id, status);
       await load();
+      if (view && (view.id === id || view.code === updated?.code)) {
+        setView(updated);
+      }
     } catch (e) {
       setError(e.message || "Update failed");
     }
@@ -77,7 +110,7 @@ export default function AdminOrders() {
               filter === t ? "bg-tss text-white" : "border border-line bg-white text-mute"
             }`}
           >
-            {t}
+            {t.replace("_", " ")}
           </button>
         ))}
       </div>
@@ -88,7 +121,9 @@ export default function AdminOrders() {
         className="mt-3 w-full max-w-md border border-line px-3 py-2.5 text-sm outline-none focus:border-tss"
       />
 
-      <p className="mt-3 text-xs text-mute">{shown.length} of {orders.length} orders</p>
+      <p className="mt-3 text-xs text-mute">
+        {shown.length} of {orders.length} orders
+      </p>
 
       <div className="mt-5 space-y-3">
         {shown.length === 0 && !busy && (
@@ -102,47 +137,142 @@ export default function AdminOrders() {
                 <p className="text-sm text-mute">
                   {o.customer?.name || "—"} · {o.customer?.phone || "—"}
                 </p>
-                <p className="text-xs text-mute">
-                  {[o.customer?.address, o.customer?.city, o.customer?.state, o.customer?.pincode]
-                    .filter(Boolean)
-                    .join(", ") || "—"}
-                </p>
                 <p className="mt-1 text-[11px] text-mute">
                   {o.createdAt ? new Date(o.createdAt).toLocaleString() : ""}
                 </p>
               </div>
               <div className="text-right">
                 <p className="font-bold">{inr(o.total || 0)}</p>
-                <p className="text-xs uppercase text-mute">{o.payment || "—"}</p>
+                <p className="text-xs font-bold uppercase text-mute">{paymentLabel(o)}</p>
+                <p className="mt-1 text-[10px] font-bold uppercase text-tss">{o.status}</p>
               </div>
             </div>
-            <ul className="mt-3 space-y-1 border-t border-line pt-3 text-sm text-mute">
-              {(o.items || []).map((i, idx) => (
-                <li key={idx}>
-                  • {i.name} · UK {i.size} ×{i.qty}
-                </li>
-              ))}
-            </ul>
-            {o.discount > 0 && (
-              <p className="mt-2 text-sm font-semibold text-off">
-                Coupon {o.couponCode}: −{inr(o.discount)}
-              </p>
-            )}
             <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setView(o)}
+                className="rounded-lg bg-ink px-3 py-2 text-[11px] font-bold uppercase text-white hover:bg-black"
+              >
+                View Order
+              </button>
               <span className="text-xs font-bold uppercase text-mute">Status</span>
               <select
-                value={o.status || "placed"}
+                value={STATUSES.includes(o.status) ? o.status : "placed"}
                 onChange={(e) => update(o.id, e.target.value)}
                 className="border border-line px-2 py-1.5 text-sm"
               >
                 {STATUSES.map((s) => (
-                  <option key={s} value={s}>{s}</option>
+                  <option key={s} value={s}>
+                    {s.replace("_", " ")}
+                  </option>
                 ))}
               </select>
             </div>
           </div>
         ))}
       </div>
+
+      {view && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 p-3 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Order ${view.code}`}
+          onClick={() => setView(null)}
+        >
+          <div
+            className="max-h-[92vh] w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-line px-4 py-3.5">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-mute">Order details</p>
+                <h2 className="font-display text-xl font-extrabold">{view.code}</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setView(null)}
+                className="rounded-lg border border-line px-2.5 py-1 text-sm font-bold hover:border-tss"
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="max-h-[calc(92vh-4.5rem)] overflow-y-auto px-4 py-4">
+              <div className="rounded-xl border border-line p-3">
+                <Row label="Status">
+                  <span className="uppercase text-tss">{view.status}</span>
+                </Row>
+                <Row label="Payment">{paymentLabel(view)}</Row>
+                <Row label="Total">{inr(view.total || 0)}</Row>
+                <Row label="Subtotal">{inr(view.subtotal || 0)}</Row>
+                {(view.discount > 0 || view.prepaidDiscount > 0 || view.couponDiscount > 0) && (
+                  <Row label="Discount">−{inr(view.discount || 0)}</Row>
+                )}
+                {view.couponCode && <Row label="Coupon">{view.couponCode}</Row>}
+                <Row label="Shipping">{view.shipping ? inr(view.shipping) : "FREE"}</Row>
+                <Row label="Placed">
+                  {view.createdAt ? new Date(view.createdAt).toLocaleString() : "—"}
+                </Row>
+                {view.paidAt && (
+                  <Row label="Paid at">{new Date(view.paidAt).toLocaleString()}</Row>
+                )}
+                {view.razorpayPaymentId && <Row label="Payment ID">{view.razorpayPaymentId}</Row>}
+                {view.razorpayOrderId && <Row label="Razorpay order">{view.razorpayOrderId}</Row>}
+              </div>
+
+              <h3 className="mt-5 text-[11px] font-bold uppercase tracking-wide text-mute">Customer</h3>
+              <div className="mt-2 rounded-xl border border-line p-3 text-sm">
+                <p className="font-bold">{view.customer?.name || "—"}</p>
+                <p className="mt-1 text-mute">{view.customer?.email || "—"}</p>
+                <p className="text-mute">{view.customer?.phone || "—"}</p>
+                <p className="mt-2 leading-relaxed text-mute">
+                  {[view.customer?.address, view.customer?.city, view.customer?.state, view.customer?.pincode]
+                    .filter(Boolean)
+                    .join(", ") || "—"}
+                </p>
+              </div>
+
+              <h3 className="mt-5 text-[11px] font-bold uppercase tracking-wide text-mute">Items</h3>
+              <ul className="mt-2 space-y-2">
+                {(view.items || []).map((i, idx) => (
+                  <li key={idx} className="flex gap-3 rounded-xl border border-line p-2.5">
+                    <img
+                      src={mediaUrl(i.image)}
+                      alt=""
+                      className="h-14 w-14 shrink-0 bg-wash object-cover"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="line-clamp-2 font-semibold">{i.name}</p>
+                      <p className="text-[12px] text-mute">
+                        UK {i.size}
+                        {i.color ? ` · ${i.color}` : ""} ×{i.qty}
+                      </p>
+                      <p className="font-bold">{inr((i.price || 0) * (i.qty || 1))}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-line pt-4">
+                <span className="text-xs font-bold uppercase text-mute">Update status</span>
+                <select
+                  value={STATUSES.includes(view.status) ? view.status : "placed"}
+                  onChange={(e) => update(view.id, e.target.value)}
+                  className="border border-line px-2 py-1.5 text-sm"
+                >
+                  {STATUSES.map((s) => (
+                    <option key={s} value={s}>
+                      {s.replace("_", " ")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
