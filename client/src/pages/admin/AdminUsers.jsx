@@ -103,7 +103,6 @@ export default function AdminUsers() {
                     <p className="font-display text-lg font-extrabold">{u.name}</p>
                     <p className="text-sm text-mute">{u.email}</p>
                     {u.phone && <p className="text-sm text-mute">{u.phone}</p>}
-                    {u.country && <p className="text-sm text-mute">{u.country}</p>}
                     <p className="mt-1 text-[11px] text-mute">
                       <span className="uppercase">{u.provider || "email"}</span>
                       {u.createdAt ? ` · Joined ${new Date(u.createdAt).toLocaleDateString()}` : ""}
