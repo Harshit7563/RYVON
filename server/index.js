@@ -298,6 +298,7 @@ function publicUser(u) {
     name: u.name,
     email: u.email,
     phone: u.phone || "",
+    country: u.country || "",
     picture: u.picture || null,
     provider: u.provider || "email",
     active: u.active !== false,
@@ -349,6 +350,7 @@ function upsertUser(payload = {}) {
       name: String(payload.name || email.split("@")[0]).trim(),
       email,
       phone: phoneKey.length >= 10 && !findUserByPhone(phoneRaw) ? phoneRaw : "",
+      country: payload.country ? String(payload.country).trim() : "",
       picture: payload.picture || null,
       provider: payload.provider || "email",
       password: payload.password ? hashPassword(payload.password) : "",
@@ -375,6 +377,7 @@ function upsertUser(payload = {}) {
       }
     }
     if (payload.picture) user.picture = payload.picture;
+    if (payload.country) user.country = String(payload.country).trim();
     if (payload.provider && payload.provider !== "order") user.provider = payload.provider;
     if (payload.password) user.password = hashPassword(payload.password);
     if (Array.isArray(payload.wishlist)) {
@@ -1099,10 +1102,12 @@ app.post("/api/auth/register", (req, res) => {
   const email = String(b.email || "").trim().toLowerCase();
   const name = String(b.name || "").trim();
   const phone = String(b.phone || "").trim();
+  const country = String(b.country || "").trim();
   const password = String(b.password || "");
   if (!email.includes("@")) return res.status(400).json({ error: "Valid email required" });
   if (!name) return res.status(400).json({ error: "Name required" });
   if (normalizePhone(phone).length < 10) return res.status(400).json({ error: "Valid phone required" });
+  if (!country) return res.status(400).json({ error: "Country required" });
   if (password.length < 4) return res.status(400).json({ error: "Password must be at least 4 characters" });
   if (store.users.some((u) => u.email === email)) {
     return res.status(400).json({ error: "Email already registered. Please login." });
@@ -1114,6 +1119,7 @@ app.post("/api/auth/register", (req, res) => {
     name,
     email,
     phone,
+    country,
     password,
     wishlist: b.wishlist,
     provider: "email",

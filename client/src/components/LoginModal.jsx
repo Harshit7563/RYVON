@@ -6,6 +6,26 @@ import GoogleSignInButton from "./GoogleSignInButton";
 
 const BENEFITS = ["Track orders live", "Early access drops", "Wishlist sync"];
 
+const COUNTRIES = [
+  "India",
+  "United Arab Emirates",
+  "United States",
+  "United Kingdom",
+  "Canada",
+  "Australia",
+  "Singapore",
+  "Nepal",
+  "Bangladesh",
+  "Sri Lanka",
+  "Saudi Arabia",
+  "Qatar",
+  "Oman",
+  "Kuwait",
+  "Germany",
+  "France",
+  "Other",
+];
+
 export default function LoginModal() {
   const { loginOpen, closeLogin, register, loginWithEmail, loginWithGoogle } = useAuth();
   const { ids: wishIds } = useWishlist();
@@ -14,6 +34,7 @@ export default function LoginModal() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [phone, setPhone] = useState("");
+  const [country, setCountry] = useState("India");
   const [showPass, setShowPass] = useState(false);
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState("");
@@ -49,6 +70,7 @@ export default function LoginModal() {
       setEmail("");
       setPassword("");
       setPhone("");
+      setCountry("India");
       setDone(false);
     }, 280);
   };
@@ -74,6 +96,10 @@ export default function LoginModal() {
         setError("Enter a valid 10-digit phone number");
         return;
       }
+      if (!country.trim()) {
+        setError("Please select your country");
+        return;
+      }
     }
     setBusy(true);
     try {
@@ -82,6 +108,7 @@ export default function LoginModal() {
           name: name.trim(),
           email: email.trim(),
           phone: phone.trim(),
+          country: country.trim(),
           password,
           wishlist: wishIds,
         });
@@ -310,27 +337,60 @@ export default function LoginModal() {
                   </label>
 
                   {tab === "register" && (
-                    <label className="block">
-                      <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.08em] text-mute">
-                        Phone
-                      </span>
-                      <div className="relative">
-                        <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-mute">
-                          <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-                            <path d="M7 3h4l1 4-2 1a12 12 0 006 6l1-2 4 1v4a2 2 0 01-2 2A15 15 0 015 5a2 2 0 012-2z" />
-                          </svg>
+                    <div className="grid gap-3.5 sm:grid-cols-2">
+                      <label className="block">
+                        <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.08em] text-mute">
+                          Phone
                         </span>
-                        <input
-                          type="tel"
-                          value={phone}
-                          onChange={(e) => setPhone(e.target.value)}
-                          placeholder="+91 XXXXX XXXXX"
-                          className={field}
-                          inputMode="tel"
-                          required
-                        />
-                      </div>
-                    </label>
+                        <div className="relative">
+                          <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-mute">
+                            <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                              <path d="M7 3h4l1 4-2 1a12 12 0 006 6l1-2 4 1v4a2 2 0 01-2 2A15 15 0 015 5a2 2 0 012-2z" />
+                            </svg>
+                          </span>
+                          <input
+                            type="tel"
+                            value={phone}
+                            onChange={(e) => setPhone(e.target.value)}
+                            placeholder="+91 XXXXX XXXXX"
+                            className={field}
+                            inputMode="tel"
+                            required
+                          />
+                        </div>
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.08em] text-mute">
+                          Location
+                        </span>
+                        <div className="relative">
+                          <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-mute">
+                            <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                              <path d="M12 21s7-5.2 7-11a7 7 0 10-14 0c0 5.8 7 11 7 11z" />
+                              <circle cx="12" cy="10" r="2.5" />
+                            </svg>
+                          </span>
+                          <select
+                            value={country}
+                            onChange={(e) => setCountry(e.target.value)}
+                            className={`${field} appearance-none pr-9`}
+                            required
+                            aria-label="Country"
+                          >
+                            {COUNTRIES.map((c) => (
+                              <option key={c} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
+                          <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-mute">
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8">
+                              <path d="M2 4l4 4 4-4" />
+                            </svg>
+                          </span>
+                        </div>
+                      </label>
+                    </div>
                   )}
 
                   <label className="block">

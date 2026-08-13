@@ -38,6 +38,7 @@ export function AuthProvider({ children }) {
       name: u.name?.trim() || u.email.split("@")[0],
       email: u.email.trim().toLowerCase(),
       phone: u.phone ? String(u.phone).trim() : "",
+      country: u.country ? String(u.country).trim() : "",
       picture: u.picture || null,
       provider: u.provider || "email",
       wishlist: Array.isArray(u.wishlist) ? u.wishlist : [],
@@ -57,8 +58,8 @@ export function AuthProvider({ children }) {
     });
   };
 
-  const register = async ({ name, email, phone, password, wishlist }) => {
-    const u = await authRegister({ name, email, phone, password, wishlist });
+  const register = async ({ name, email, phone, country, password, wishlist }) => {
+    const u = await authRegister({ name, email, phone, country, password, wishlist });
     applyUser(u);
     return u;
   };
