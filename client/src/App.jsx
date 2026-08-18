@@ -22,6 +22,7 @@ import AdminBanners from "./pages/admin/AdminBanners";
 import AdminCoupons from "./pages/admin/AdminCoupons";
 import AdminUsers from "./pages/admin/AdminUsers";
 import AdminOrders from "./pages/admin/AdminOrders";
+import AdminTrackOrder from "./pages/admin/AdminTrackOrder";
 import AdminMessages from "./pages/admin/AdminMessages";
 
 export default function App() {
@@ -64,6 +65,7 @@ export default function App() {
         <Route path="coupons" element={<AdminCoupons />} />
         <Route path="users" element={<AdminUsers />} />
         <Route path="orders" element={<AdminOrders />} />
+        <Route path="track-order" element={<AdminTrackOrder />} />
         <Route path="messages" element={<AdminMessages />} />
       </Route>
     </Routes>

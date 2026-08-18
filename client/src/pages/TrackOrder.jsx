@@ -68,6 +68,16 @@ export default function TrackOrder() {
           <div className="mt-6 space-y-2 border-t border-line pt-4 text-sm">
             <p><span className="text-mute">Ship to:</span> {order.customer.name}, {order.customer.city}</p>
             <p><span className="text-mute">Total:</span> <strong>{inr(order.total)}</strong></p>
+            {order.awb && (
+              <p><span className="text-mute">AWB:</span> <strong>{order.awb}</strong> {order.courierName ? `· ${order.courierName}` : ""}</p>
+            )}
+            {order.tracking?.shipStatus && (
+              <p><span className="text-mute">Courier:</span> {order.tracking.shipStatus}{order.tracking.location ? ` · ${order.tracking.location}` : ""}</p>
+            )}
+            {order.tracking?.message && <p className="text-mute">{order.tracking.message}</p>}
+            {order.tracking?.edd && (
+              <p><span className="text-mute">EDD:</span> {new Date(order.tracking.edd).toLocaleDateString()}</p>
+            )}
           </div>
           <ul className="mt-3 space-y-1 text-sm text-mute">
             {order.items.map((i, idx) => (

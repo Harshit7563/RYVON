@@ -43,6 +43,7 @@ const EMPTY = () => ({
   ],
   sizes: [7, 8, 9, 10, 11],
   stock: defaultStock([7, 8, 9, 10, 11], 10),
+  featuredTop: false,
 });
 
 function normalizeColors(p) {
@@ -90,6 +91,7 @@ function formFromProduct(p) {
     colorOptions: normalizeColors(p),
     sizes,
     stock: normalizeStock(p, sizes),
+    featuredTop: !!p?.featuredTop,
   };
 }
 
@@ -262,6 +264,7 @@ export default function AdminProducts() {
         sizes: form.sizes,
         stock: form.stock,
         features,
+        featuredTop: !!form.featuredTop,
       };
       const currentId = editIdRef.current;
       if (currentId != null && currentId !== "") {
@@ -307,6 +310,16 @@ export default function AdminProducts() {
     }
   };
 
+  const toggleTop = async (p) => {
+    try {
+      setError("");
+      await adminUpdateProduct(p.id, { featuredTop: !p.featuredTop });
+      await load();
+    } catch (err) {
+      setError(err.message || "Could not pin product");
+    }
+  };
+
   const catOptions = cats.length
     ? cats.map((c) => c.filter || c.slug || c.id)
     : ["air-force", "low-dunk", "travis-scott", "jordan", "retro", "samba"];
@@ -314,15 +327,17 @@ export default function AdminProducts() {
     ? [form.category, ...catOptions]
     : catOptions;
 
-  const shown = list.filter((p) => {
-    if (!q.trim()) return true;
-    const s = q.toLowerCase();
-    return (
-      String(p.name || "").toLowerCase().includes(s) ||
-      String(p.category || "").toLowerCase().includes(s) ||
-      String(p.type || "").toLowerCase().includes(s)
-    );
-  });
+  const shown = list
+    .filter((p) => {
+      if (!q.trim()) return true;
+      const s = q.toLowerCase();
+      return (
+        String(p.name || "").toLowerCase().includes(s) ||
+        String(p.category || "").toLowerCase().includes(s) ||
+        String(p.type || "").toLowerCase().includes(s)
+      );
+    })
+    .sort((a, b) => Number(!!b.featuredTop) - Number(!!a.featuredTop));
 
   return (
     <div>
@@ -375,9 +390,13 @@ export default function AdminProducts() {
             <input required type="number" placeholder="Price *" value={form.price} onChange={(e) => set("price", e.target.value)} className="border border-line px-3 py-2.5 text-sm outline-none focus:border-tss" />
             <input type="number" placeholder="MRP" value={form.mrp} onChange={(e) => set("mrp", e.target.value)} className="border border-line px-3 py-2.5 text-sm outline-none focus:border-tss" />
 
-            <label className="flex items-center gap-2 text-sm sm:col-span-2">
+            <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={form.active} onChange={(e) => set("active", e.target.checked)} />
               Active on website (uncheck to hide)
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={!!form.featuredTop} onChange={(e) => set("featuredTop", e.target.checked)} />
+              Show this product on top
             </label>
 
             <ImageUploadField
@@ -511,7 +530,12 @@ export default function AdminProducts() {
                   <div className="flex items-center gap-3">
                     <img src={mediaUrl(p.image)} alt="" className="h-12 w-12 object-cover" onError={(e) => { e.currentTarget.src = "/products/p1.jpg"; }} />
                     <div>
-                      <p className="font-semibold">{p.name}</p>
+                      <p className="font-semibold">
+                        {p.name}
+                        {p.featuredTop ? (
+                          <span className="ml-2 rounded bg-tss/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-tss">Top</span>
+                        ) : null}
+                      </p>
                       <p className="text-xs text-mute">{p.type} · {(p.sizes || []).join(", ")}</p>
                     </div>
                   </div>
@@ -532,6 +556,9 @@ export default function AdminProducts() {
                 <td className="px-3 py-3">
                   <div className="flex gap-2">
                     <button type="button" onClick={() => startEdit(p)} className="text-xs font-bold uppercase text-ink underline">Edit</button>
+                    <button type="button" onClick={() => toggleTop(p)} className="text-xs font-bold uppercase text-off underline">
+                      {p.featuredTop ? "Unpin" : "Pin top"}
+                    </button>
                     <button type="button" onClick={() => remove(p.id)} className="text-xs font-bold uppercase text-tss underline">Delete</button>
                   </div>
                 </td>

@@ -14,6 +14,13 @@ import {
   verifyPaymentSignature,
   verifyWebhookSignature,
 } from "./razorpay.js";
+import {
+  nimbusConfigured,
+  summarizeTracking,
+  trackBulk,
+  trackByAwb,
+  verifyNimbusSignature,
+} from "./nimbuspost.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, ".env") });
@@ -446,7 +453,10 @@ app.use(
   express.json({
     limit: "25mb",
     verify: (req, _res, buf) => {
-      if (req.originalUrl?.includes("/payments/razorpay/webhook")) {
+      if (
+        req.originalUrl?.includes("/payments/razorpay/webhook") ||
+        req.originalUrl?.includes("/nimbuspost/webhook")
+      ) {
         req.rawBody = buf;
       }
     },
@@ -537,6 +547,31 @@ function restoreStock(lines) {
 
 function sortBySort(a, b) {
   return (a.sort || 0) - (b.sort || 0);
+}
+
+function pinFeaturedFirst(list) {
+  const featured = list
+    .filter((p) => p?.featuredTop)
+    .sort((a, b) => (Date.parse(b?.featuredAt || "") || 0) - (Date.parse(a?.featuredAt || "") || 0));
+  const rest = list.filter((p) => !p?.featuredTop);
+  return [...featured, ...rest];
+}
+
+function applyTrackingToOrder(order, summary) {
+  if (!order || !summary) return order;
+  order.awb = summary.awb || order.awb;
+  order.courierName = summary.courierName || order.courierName;
+  order.shipStatus = summary.shipStatus || order.shipStatus;
+  order.tracking = {
+    ...summary,
+    updatedAt: new Date().toISOString(),
+  };
+  if (summary.mappedStatus && order.status !== "cancelled") {
+    const rank = { pending_payment: 0, placed: 1, confirmed: 2, shipped: 3, delivered: 4 };
+    const next = summary.mappedStatus;
+    if ((rank[next] || 0) >= (rank[order.status] || 0)) order.status = next;
+  }
+  return order;
 }
 
 app.get("/api/site", (_req, res) => {
@@ -640,6 +675,7 @@ app.get("/api/products", (req, res) => {
   if (sort === "price-asc") list.sort((a, b) => a.price - b.price);
   else if (sort === "price-desc") list.sort((a, b) => b.price - a.price);
   else if (sort === "newest") list.sort((a, b) => b.id - a.id);
+  else list = pinFeaturedFirst(list);
 
   res.json(list);
 });
@@ -654,9 +690,9 @@ app.get("/api/products/:id/related", (req, res) => {
   const p = store.products.find((x) => x.id === Number(req.params.id));
   if (!p) return res.status(404).json([]);
   const related = store.products
-    .filter((x) => x.active !== false && x.id !== p.id && x.category === p.category)
-    .slice(0, 8);
-  res.json(related.length ? related : store.products.filter((x) => x.active !== false && x.id !== p.id).slice(0, 8));
+    .filter((x) => x.active !== false && x.id !== p.id && x.category === p.category);
+  const picked = pinFeaturedFirst(related).slice(0, 8);
+  res.json(picked.length ? picked : pinFeaturedFirst(store.products.filter((x) => x.active !== false && x.id !== p.id)).slice(0, 8));
 });
 
 app.post("/api/coupons/validate", (req, res) => {
@@ -1005,10 +1041,19 @@ app.get("/api/my-orders", (req, res) => {
   res.json(list);
 });
 
-app.get("/api/orders/:code", (req, res) => {
+app.get("/api/orders/:code", async (req, res) => {
   reloadStore();
   const o = store.orders.find((x) => x.code === req.params.code || String(x.id) === req.params.code);
   if (!o) return res.status(404).json({ error: "Order not found" });
+  if (o.awb && nimbusConfigured()) {
+    try {
+      const data = await trackByAwb(o.awb);
+      applyTrackingToOrder(o, summarizeTracking(data));
+      saveStore(store);
+    } catch {
+      /* keep cached tracking */
+    }
+  }
   res.json(o);
 });
 
@@ -1400,6 +1445,8 @@ app.post("/api/admin/products", authAdmin, (req, res) => {
     features: Array.isArray(b.features) ? b.features : (b.features ? String(b.features).split("|").map((s) => s.trim()).filter(Boolean) : ["Premium build", "Everyday comfort"]),
     createdAt: now,
     updatedAt: now,
+    featuredTop: !!b.featuredTop,
+    featuredAt: b.featuredTop ? now : null,
   };
   store.products.unshift(product);
   saveStore(store);
@@ -1457,6 +1504,11 @@ app.put("/api/admin/products/:id", authAdmin, (req, res) => {
     createdAt: prev.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
+  if (b.featuredTop !== undefined) {
+    const on = !!b.featuredTop;
+    next.featuredTop = on;
+    next.featuredAt = on ? new Date().toISOString() : null;
+  }
   if (Array.isArray(b.colorOptions)) {
     next.colorOptions = b.colorOptions.map((c) =>
       typeof c === "string"
@@ -1602,18 +1654,123 @@ app.get("/api/admin/orders", authAdmin, (_req, res) => {
   res.json(list);
 });
 
-app.patch("/api/admin/orders/:id", authAdmin, (req, res) => {
+app.patch("/api/admin/orders/:id", authAdmin, async (req, res) => {
   reloadStore();
-  const o = store.orders.find((x) => x.id === Number(req.params.id));
+  const o = store.orders.find((x) => x.id === Number(req.params.id) || x.code === String(req.params.id));
   if (!o) return res.status(404).json({ error: "Not found" });
   const prev = o.status;
   if (req.body?.status) o.status = req.body.status;
+  if (req.body?.awb !== undefined) {
+    o.awb = String(req.body.awb || "").trim();
+    if (!o.awb) {
+      o.courierName = "";
+      o.shipStatus = "";
+      o.tracking = null;
+    }
+  }
   if (prev !== "cancelled" && o.status === "cancelled") {
     restoreStock(o.items);
+  }
+  if (o.awb && nimbusConfigured()) {
+    try {
+      const data = await trackByAwb(o.awb);
+      applyTrackingToOrder(o, summarizeTracking(data));
+    } catch (err) {
+      if (err.status === 404) {
+        return res.status(400).json({ error: "AWB not found on NimbusPost" });
+      }
+      console.error("[nimbus track save]", err.message);
+    }
   }
   saveStore(store);
   res.json(o);
 });
+
+app.get("/api/admin/tracking", authAdmin, async (req, res) => {
+  const q = String(req.query.q || req.query.awb || req.query.code || "").trim();
+  if (!q) return res.status(400).json({ error: "Enter order ID or AWB" });
+  if (!nimbusConfigured()) {
+    return res.status(503).json({ error: "NimbusPost is not configured" });
+  }
+  reloadStore();
+  const order =
+    store.orders.find((x) => x.code === q || String(x.id) === q) ||
+    store.orders.find((x) => String(x.awb || "").toLowerCase() === q.toLowerCase());
+  const awb = order?.awb || q;
+  try {
+    const data = await trackByAwb(awb);
+    const tracking = summarizeTracking(data);
+    if (order) {
+      applyTrackingToOrder(order, tracking);
+      saveStore(store);
+    }
+    res.json({
+      ok: true,
+      order: order || null,
+      tracking,
+      live: true,
+    });
+  } catch (err) {
+    res.status(err.status || 502).json({
+      error: err.message || "Tracking failed",
+      order: order || null,
+    });
+  }
+});
+
+app.get("/api/admin/tracking/live", authAdmin, async (_req, res) => {
+  reloadStore();
+  const shipped = (store.orders || []).filter((o) => o.awb);
+  if (!nimbusConfigured()) {
+    return res.json({
+      ok: true,
+      configured: false,
+      orders: shipped.map((o) => ({ order: o, tracking: o.tracking || null })),
+    });
+  }
+  try {
+    const bulk = await trackBulk(shipped.map((o) => o.awb));
+    const found = bulk?.found || [];
+    const byAwb = new Map(found.map((d) => [String(d?.shipment?.awb || "").toLowerCase(), d]));
+    const rows = shipped.map((o) => {
+      const data = byAwb.get(String(o.awb).toLowerCase());
+      if (data) applyTrackingToOrder(o, summarizeTracking(data));
+      return { order: o, tracking: o.tracking || summarizeTracking(data) };
+    });
+    saveStore(store);
+    res.json({ ok: true, configured: true, orders: rows, notFound: bulk?.notFound || [] });
+  } catch (err) {
+    res.json({
+      ok: true,
+      configured: true,
+      error: err.message,
+      orders: shipped.map((o) => ({ order: o, tracking: o.tracking || null })),
+    });
+  }
+});
+
+app.post("/api/nimbuspost/webhook", (req, res) => {
+  const signature = req.headers["x-nimbus-signature"] || req.headers["x-nimbuspost-signature"];
+  const raw = req.rawBody || Buffer.from(JSON.stringify(req.body || {}));
+  if (!verifyNimbusSignature(raw, signature)) {
+    return res.status(401).json({ error: "Invalid signature" });
+  }
+  const payload = req.body || {};
+  const event = payload.event || payload.type || payload.name;
+  const data = payload.data || payload;
+  const awb = data?.shipment?.awb || data?.awb || data?.latest?.awb;
+  const summary = summarizeTracking(data?.shipment ? data : { ...data, shipment: data.shipment || { awb } });
+  reloadStore();
+  if (awb) {
+    const order = store.orders.find((o) => String(o.awb || "").toLowerCase() === String(awb).toLowerCase());
+    if (order) {
+      applyTrackingToOrder(order, summary);
+      saveStore(store);
+    }
+  }
+  res.json({ ok: true, event: event || "received" });
+});
+
 
 app.get("/api/admin/messages", authAdmin, (_req, res) => {
   reloadStore();

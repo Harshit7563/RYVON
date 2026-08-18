@@ -155,6 +155,12 @@ export const adminUpdateUser = (id, body) =>
 export const adminOrders = () => req("/admin/orders", { headers: adminHeaders() });
 export const adminUpdateOrder = (id, status) =>
   req(`/admin/orders/${id}`, { method: "PATCH", headers: adminHeaders(), body: JSON.stringify({ status }) });
+export const adminPatchOrder = (id, body) =>
+  req(`/admin/orders/${id}`, { method: "PATCH", headers: adminHeaders(), body: JSON.stringify(body) });
+export const adminTrackOrder = (q) =>
+  req(`/admin/tracking?q=${encodeURIComponent(q)}`, { headers: adminHeaders() });
+export const adminLiveTracking = () =>
+  req("/admin/tracking/live", { headers: adminHeaders() });
 export const adminMessages = () => req("/admin/messages", { headers: adminHeaders() });
 export const adminReadMessage = (id) =>
   req(`/admin/messages/${id}`, { method: "PATCH", headers: adminHeaders(), body: JSON.stringify({}) });

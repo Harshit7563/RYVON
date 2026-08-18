@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { adminOrders, adminUpdateOrder, inr, mediaUrl } from "../../api";
 
 const STATUSES = ["pending_payment", "placed", "confirmed", "shipped", "delivered", "cancelled"];
@@ -155,6 +156,12 @@ export default function AdminOrders() {
               >
                 View Order
               </button>
+              <Link
+                to={`/admin/track-order?q=${encodeURIComponent(o.awb || o.code)}`}
+                className="rounded-lg border border-line px-3 py-2 text-[11px] font-bold uppercase hover:border-tss"
+              >
+                Track Order
+              </Link>
               <span className="text-xs font-bold uppercase text-mute">Status</span>
               <select
                 value={STATUSES.includes(o.status) ? o.status : "placed"}
@@ -220,6 +227,9 @@ export default function AdminOrders() {
                 )}
                 {view.razorpayPaymentId && <Row label="Payment ID">{view.razorpayPaymentId}</Row>}
                 {view.razorpayOrderId && <Row label="Razorpay order">{view.razorpayOrderId}</Row>}
+                <Row label="AWB">{view.awb || "Not assigned"}</Row>
+                {view.courierName && <Row label="Courier">{view.courierName}</Row>}
+                {view.shipStatus && <Row label="Courier status">{view.shipStatus}</Row>}
               </div>
 
               <h3 className="mt-5 text-[11px] font-bold uppercase tracking-wide text-mute">Customer</h3>
@@ -268,6 +278,12 @@ export default function AdminOrders() {
                     </option>
                   ))}
                 </select>
+                <Link
+                  to={`/admin/track-order?q=${encodeURIComponent(view.awb || view.code)}`}
+                  className="ml-auto rounded-lg bg-tss px-3 py-2 text-[11px] font-bold uppercase text-white"
+                >
+                  Track Order
+                </Link>
               </div>
             </div>
           </div>

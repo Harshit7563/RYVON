@@ -68,6 +68,7 @@ const NAV = [
   { to: "/admin/coupons", label: "Coupons", badge: "coupons" },
   { to: "/admin/users", label: "Users", badge: "users" },
   { to: "/admin/orders", label: "Orders", badge: "orders" },
+  { to: "/admin/track-order", label: "Track Order", badge: "track" },
   { to: "/admin/messages", label: "Messages", badge: "messages" },
 ];
 
