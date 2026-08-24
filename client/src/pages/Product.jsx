@@ -69,9 +69,13 @@ export default function Product() {
         setProduct(p);
         setImg(0);
         setRelated(r);
+        if (p?.name) document.title = `${p.name} — RYVON`;
       })
       .catch(console.error)
       .finally(() => setLoading(false));
+    return () => {
+      document.title = "RYVON — Homegrown Indian Footwear";
+    };
   }, [id]);
 
   const addBag = (goCheckout = false) => {
@@ -110,10 +114,15 @@ export default function Product() {
     );
   }
 
+  const images = Array.isArray(product.images) && product.images.length
+    ? product.images
+    : [product.image || "/products/p1.jpg"].filter(Boolean);
+  const features = Array.isArray(product.features) ? product.features : [];
+  const sizes = Array.isArray(product.sizes) && product.sizes.length ? product.sizes : [7, 8, 9, 10, 11];
   const colors = productColors(product);
   const selectedColor = colors[Math.min(color, colors.length - 1)] || colors[0];
-  const off = product.mrp - product.price;
-  const offPct = Math.round((off / product.mrp) * 100);
+  const off = (product.mrp || product.price) - product.price;
+  const offPct = product.mrp ? Math.round((off / product.mrp) * 100) : 0;
 
   return (
     <div className="mx-auto max-w-[1280px] px-0 pb-28 sm:px-4 sm:pb-10 lg:px-6 lg:py-8">
@@ -148,14 +157,14 @@ export default function Product() {
               </svg>
             </button>
             <img
-              src={mediaUrl(product.images[img])}
+              src={mediaUrl(images[img] || images[0])}
               alt={product.name}
               className="h-full w-full object-cover"
               onError={(e) => { e.currentTarget.src = "/products/p1.jpg"; }}
             />
           </div>
           <div className="no-scrollbar mt-2 flex gap-2 overflow-x-auto px-3 sm:px-0">
-            {product.images.map((src, i) => (
+            {images.map((src, i) => (
               <button
                 key={i}
                 type="button"
@@ -235,7 +244,7 @@ export default function Product() {
               </button>
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
-              {product.sizes.map((s) => {
+              {sizes.map((s) => {
                 const qtyLeft = product.stock?.[String(s)];
                 const oos = qtyLeft != null && Number(qtyLeft) <= 0;
                 return (
@@ -314,15 +323,17 @@ export default function Product() {
           {/* Accordions — product details */}
           <div className="mt-6 border-t border-line">
             <Accordion title="Product Details" defaultOpen>
-              <p>{product.description}</p>
+              <p>{product.description || `${product.name} — RYVON original footwear.`}</p>
+              {features.length > 0 && (
               <ul className="mt-3 space-y-1.5">
-                {product.features.map((f) => (
+                {features.map((f) => (
                   <li key={f} className="flex gap-2">
                     <span className="text-tss">✓</span>
                     <span>{f}</span>
                   </li>
                 ))}
               </ul>
+              )}
               <div className="mt-3 grid grid-cols-2 gap-2 text-[12px]">
                 <p><span className="font-semibold text-ink">Category:</span> {product.category}</p>
                 <p><span className="font-semibold text-ink">Type:</span> {product.type}</p>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   adminCategories,
   adminCreateProduct,
@@ -96,6 +97,7 @@ function formFromProduct(p) {
 }
 
 export default function AdminProducts() {
+  const [params, setParams] = useSearchParams();
   const [list, setList] = useState([]);
   const [cats, setCats] = useState([]);
   const [form, setForm] = useState(EMPTY);
@@ -120,6 +122,19 @@ export default function AdminProducts() {
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    const edit = params.get("edit");
+    if (!edit || !list.length) return;
+    const p = list.find((x) => String(x.id) === String(edit));
+    if (p) {
+      startEdit(p);
+      const next = new URLSearchParams(params);
+      next.delete("edit");
+      setParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list, params]);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -530,12 +545,12 @@ export default function AdminProducts() {
                   <div className="flex items-center gap-3">
                     <img src={mediaUrl(p.image)} alt="" className="h-12 w-12 object-cover" onError={(e) => { e.currentTarget.src = "/products/p1.jpg"; }} />
                     <div>
-                      <p className="font-semibold">
-                        {p.name}
-                        {p.featuredTop ? (
-                          <span className="ml-2 rounded bg-tss/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-tss">Top</span>
-                        ) : null}
-                      </p>
+                    <Link to={`/admin/products/${p.id}`} className="font-semibold hover:text-tss">
+                      {p.name}
+                      {p.featuredTop ? (
+                        <span className="ml-2 rounded bg-tss/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-tss">Top</span>
+                      ) : null}
+                    </Link>
                       <p className="text-xs text-mute">{p.type} · {(p.sizes || []).join(", ")}</p>
                     </div>
                   </div>
@@ -559,6 +574,9 @@ export default function AdminProducts() {
                     <button type="button" onClick={() => toggleTop(p)} className="text-xs font-bold uppercase text-off underline">
                       {p.featuredTop ? "Unpin" : "Pin top"}
                     </button>
+                    <Link to={`/admin/products/${p.id}`} className="text-xs font-bold uppercase text-ink underline">
+                      Details
+                    </Link>
                     <button type="button" onClick={() => remove(p.id)} className="text-xs font-bold uppercase text-tss underline">Delete</button>
                   </div>
                 </td>

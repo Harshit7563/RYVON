@@ -15,6 +15,8 @@ import {
   verifyWebhookSignature,
 } from "./razorpay.js";
 import {
+  applyNimbusResultToOrder,
+  createAndBookShipment,
   nimbusConfigured,
   summarizeTracking,
   trackBulk,
@@ -574,6 +576,19 @@ function applyTrackingToOrder(order, summary) {
   return order;
 }
 
+/** Push RYVON order to NimbusPost portal (create+book, fallback create-only). */
+async function syncOrderToNimbus(order, label = "nimbus") {
+  if (!order || order.awb || !nimbusConfigured()) return order;
+  try {
+    const result = await createAndBookShipment(order);
+    applyNimbusResultToOrder(order, result);
+  } catch (err) {
+    console.error(`[${label}]`, err?.message || err);
+    order.nimbusBookingError = err?.message || "NimbusPost booking failed";
+  }
+  return order;
+}
+
 app.get("/api/site", (_req, res) => {
   const rzp = getRazorpayPublic();
   res.json({
@@ -805,6 +820,8 @@ app.post("/api/orders", async (req, res) => {
   });
 
   if (!wantsOnline) {
+    // COD: push to NimbusPost portal immediately (create+book).
+    await syncOrderToNimbus(order, "nimbus create+book COD");
     saveStore(store);
     return res.status(201).json(order);
   }
@@ -865,7 +882,7 @@ function markOrderPaid(order, paymentMeta = {}) {
   return order;
 }
 
-app.post("/api/payments/razorpay/verify", (req, res) => {
+app.post("/api/payments/razorpay/verify", async (req, res) => {
   const {
     orderCode,
     razorpay_order_id: razorpayOrderId,
@@ -898,6 +915,7 @@ app.post("/api/payments/razorpay/verify", (req, res) => {
 
   if (order) {
     markOrderPaid(order, { razorpayOrderId, razorpayPaymentId });
+    await syncOrderToNimbus(order, "nimbus create+book razorpay");
     saveStore(store);
     return res.json({ success: true, verified: true, order });
   }
@@ -998,7 +1016,7 @@ app.post("/api/payments/razorpay/cancel", (req, res) => {
   res.json({ ok: true, order });
 });
 
-app.post("/api/payments/razorpay/webhook", (req, res) => {
+app.post("/api/payments/razorpay/webhook", async (req, res) => {
   try {
     const signature = req.headers["x-razorpay-signature"];
     const raw = req.rawBody || Buffer.from(JSON.stringify(req.body || {}));
@@ -1020,6 +1038,10 @@ app.post("/api/payments/razorpay/webhook", (req, res) => {
           razorpayPaymentId: paymentEntity.id,
           method: paymentEntity.method,
         });
+        await syncOrderToNimbus(order, "nimbus create+book razorpay webhook");
+        saveStore(store);
+      } else if (order && order.paymentStatus === "paid" && !order.awb) {
+        await syncOrderToNimbus(order, "nimbus create+book razorpay webhook retry");
         saveStore(store);
       }
     }
@@ -1671,6 +1693,23 @@ app.patch("/api/admin/orders/:id", authAdmin, async (req, res) => {
   if (prev !== "cancelled" && o.status === "cancelled") {
     restoreStock(o.items);
   }
+
+  // Admin: confirmed / ship-now → push to NimbusPost portal.
+  const wantsShip =
+    req.body?.ship === true ||
+    req.body?.syncNimbus === true ||
+    (o.status === "confirmed" && !o.awb);
+  if (wantsShip && !o.awb && nimbusConfigured()) {
+    const paymentOk =
+      String(o.paymentStatus || "").toLowerCase() === "cod" ||
+      String(o.payment || "").toLowerCase() === "cod" ||
+      String(o.paymentStatus || "").toLowerCase() === "paid" ||
+      String(o.payment || "").toLowerCase() === "paid";
+    if (paymentOk || req.body?.ship === true || req.body?.syncNimbus === true) {
+      await syncOrderToNimbus(o, "nimbus create+book admin");
+    }
+  }
+
   if (o.awb && nimbusConfigured()) {
     try {
       const data = await trackByAwb(o.awb);

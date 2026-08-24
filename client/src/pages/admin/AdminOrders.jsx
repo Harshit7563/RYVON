@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { adminOrders, adminUpdateOrder, inr, mediaUrl } from "../../api";
+import { adminOrders, adminPatchOrder, adminUpdateOrder, inr, mediaUrl } from "../../api";
 
 const STATUSES = ["pending_payment", "placed", "confirmed", "shipped", "delivered", "cancelled"];
 
@@ -68,6 +68,21 @@ export default function AdminOrders() {
       }
     } catch (e) {
       setError(e.message || "Update failed");
+    }
+  };
+
+  const pushNimbus = async (id) => {
+    setBusy(true);
+    setError("");
+    try {
+      const updated = await adminPatchOrder(id, { syncNimbus: true, status: "confirmed" });
+      await load();
+      setView(updated);
+      if (updated?.nimbusBookingError) setError(updated.nimbusBookingError);
+    } catch (e) {
+      setError(e.message || "NimbusPost sync failed");
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -230,6 +245,12 @@ export default function AdminOrders() {
                 <Row label="AWB">{view.awb || "Not assigned"}</Row>
                 {view.courierName && <Row label="Courier">{view.courierName}</Row>}
                 {view.shipStatus && <Row label="Courier status">{view.shipStatus}</Row>}
+                {view.nimbusOrderId && <Row label="Nimbus order">{view.nimbusOrderId}</Row>}
+                {view.nimbusBookingError && (
+                  <Row label="NimbusPost">
+                    <span className="text-tss">{String(view.nimbusBookingError || "").slice(0, 220)}</span>
+                  </Row>
+                )}
               </div>
 
               <h3 className="mt-5 text-[11px] font-bold uppercase tracking-wide text-mute">Customer</h3>
@@ -278,6 +299,16 @@ export default function AdminOrders() {
                     </option>
                   ))}
                 </select>
+                {!view.awb && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => pushNimbus(view.id)}
+                    className="rounded-lg border border-line px-3 py-2 text-[11px] font-bold uppercase hover:border-tss disabled:opacity-50"
+                  >
+                    {busy ? "…" : "Send to Nimbus"}
+                  </button>
+                )}
                 <Link
                   to={`/admin/track-order?q=${encodeURIComponent(view.awb || view.code)}`}
                   className="ml-auto rounded-lg bg-tss px-3 py-2 text-[11px] font-bold uppercase text-white"
