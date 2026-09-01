@@ -202,7 +202,7 @@ export default function Checkout() {
       }
 
       clear();
-      nav(`/order/${order.code}`, { replace: true });
+      nav("/thank-you", { replace: true, state: { order } });
     } catch (err) {
       if (createdCode && payment === "razorpay" && paymentStarted) {
         try {

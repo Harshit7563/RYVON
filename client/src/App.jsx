@@ -5,7 +5,8 @@ import Shop from "./pages/Shop";
 import Product from "./pages/Product";
 import Cart from "./pages/Cart";
 import Checkout from "./pages/Checkout";
-import OrderSuccess from "./pages/OrderSuccess";
+import ThankYou from "./pages/ThankYou";
+import OrderRedirect from "./pages/OrderRedirect";
 import TrackOrder from "./pages/TrackOrder";
 import Account from "./pages/Account";
 import Wishlist from "./pages/Wishlist";
@@ -35,7 +36,8 @@ export default function App() {
         <Route path="/product/:id" element={<Product />} />
         <Route path="/cart" element={<Cart />} />
         <Route path="/checkout" element={<Checkout />} />
-        <Route path="/order/:code" element={<OrderSuccess />} />
+        <Route path="/thank-you" element={<ThankYou />} />
+        <Route path="/order/:code" element={<OrderRedirect />} />
         <Route path="/track" element={<TrackOrder />} />
         <Route path="/account" element={<Account />} />
         <Route path="/wishlist" element={<Wishlist />} />
