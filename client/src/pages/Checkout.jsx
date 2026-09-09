@@ -31,7 +31,7 @@ export default function Checkout() {
   const ship = total >= 999 ? 0 : 79;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [payment, setPayment] = useState("cod");
+  const [payment, setPayment] = useState("razorpay");
   const [couponInput, setCouponInput] = useState("");
   const [applied, setApplied] = useState(null);
   const [couponBusy, setCouponBusy] = useState(false);
@@ -53,9 +53,14 @@ export default function Checkout() {
     getSite()
       .then((s) => {
         if (s?.prepaidPercent != null) setPrepaidPct(Number(s.prepaidPercent) || 5);
-        setRazorpayEnabled(!!s?.razorpayEnabled);
+        const enabled = !!s?.razorpayEnabled;
+        setRazorpayEnabled(enabled);
+        // Prefer Razorpay when live; fall back to COD if keys missing
+        setPayment(enabled ? "razorpay" : "cod");
       })
-      .catch(() => {});
+      .catch(() => {
+        setPayment("cod");
+      });
     // Prefetch Checkout.js so Pay Online opens immediately after order create
     loadRazorpayScript().catch(() => {});
   }, []);
@@ -331,25 +336,12 @@ export default function Checkout() {
             <p className="mt-1 text-sm text-mute">Choose how you’d like to pay</p>
             <div className="mt-4 space-y-2.5">
               {[
-                {
-                  id: "cod",
-                  label: "Cash on Delivery",
-                  hint: "Pay cash to the delivery partner when your order arrives",
-                  badge: "Popular",
-                  icon: (
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-                      <rect x="2" y="6" width="20" height="12" rx="2" />
-                      <circle cx="12" cy="12" r="2.5" />
-                      <path d="M6 12h.01M18 12h.01" />
-                    </svg>
-                  ),
-                },
                 razorpayEnabled
                   ? {
                       id: "razorpay",
                       label: "UPI / Cards · Razorpay",
                       hint: `Extra ${prepaidPct}% off · UPI, QR, Cards, Netbanking, EMI, Wallet & more`,
-                      badge: `${prepaidPct}% OFF`,
+                      badge: `Preferred · ${prepaidPct}% OFF`,
                       icon: (
                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
                           <rect x="2" y="5" width="20" height="14" rx="2" />
@@ -359,6 +351,19 @@ export default function Checkout() {
                       ),
                     }
                   : null,
+                {
+                  id: "cod",
+                  label: "Cash on Delivery",
+                  hint: "Pay cash to the delivery partner when your order arrives",
+                  badge: null,
+                  icon: (
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+                      <rect x="2" y="6" width="20" height="12" rx="2" />
+                      <circle cx="12" cy="12" r="2.5" />
+                      <path d="M6 12h.01M18 12h.01" />
+                    </svg>
+                  ),
+                },
               ]
                 .filter(Boolean)
                 .map((opt) => {

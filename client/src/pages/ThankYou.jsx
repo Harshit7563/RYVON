@@ -108,7 +108,7 @@ export default function ThankYou() {
           </div>
 
           <p className="relative mt-6 text-[11px] font-bold uppercase tracking-[0.22em] text-off">
-            {pendingPay ? "Almost there" : "Order confirmed"}
+            {pendingPay ? "Almost there" : "Order Confirmation"}
           </p>
           <h1 className="font-display relative mt-2 text-3xl font-extrabold uppercase leading-tight text-ink sm:text-4xl">
             {pendingPay ? "Complete payment" : `Thank you, ${firstName}!`}
