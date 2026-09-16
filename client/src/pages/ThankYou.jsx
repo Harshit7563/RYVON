@@ -49,6 +49,28 @@ export default function ThankYou() {
     else nav("/shop", { replace: true });
   }, [location.state, nav]);
 
+  // Meta Pixel — Purchase (from ads/shipping partner)
+  useEffect(() => {
+    if (!order?.code) return;
+    if (order.status === "pending_payment") return;
+    const key = `ryvon-fbq-purchase-${order.code}`;
+    try {
+      if (sessionStorage.getItem(key)) return;
+      sessionStorage.setItem(key, "1");
+    } catch {
+      /* ignore */
+    }
+    if (typeof window !== "undefined" && window.fbq) {
+      window.fbq("track", "Purchase", {
+        value: Number(order.total) || 0,
+        currency: "INR",
+        content_ids: (order.items || []).map((i) => String(i.productId || i.id || i.name || "")).filter(Boolean),
+        content_type: "product",
+        num_items: (order.items || []).reduce((n, i) => n + (Number(i.qty) || 1), 0),
+      });
+    }
+  }, [order]);
+
   async function payNow() {
     if (!order?.code) return;
     setPayErr("");
