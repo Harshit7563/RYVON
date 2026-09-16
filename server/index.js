@@ -1725,6 +1725,21 @@ app.patch("/api/admin/orders/:id", authAdmin, async (req, res) => {
   res.json(o);
 });
 
+app.delete("/api/admin/orders/:id", authAdmin, (req, res) => {
+  reloadStore();
+  const idx = store.orders.findIndex(
+    (x) => x.id === Number(req.params.id) || x.code === String(req.params.id)
+  );
+  if (idx < 0) return res.status(404).json({ error: "Not found" });
+  const [removed] = store.orders.splice(idx, 1);
+  // Put stock back unless it was already restored on cancel
+  if (removed && removed.status !== "cancelled") {
+    restoreStock(removed.items);
+  }
+  saveStore(store);
+  res.json({ ok: true, code: removed?.code });
+});
+
 app.get("/api/admin/tracking", authAdmin, async (req, res) => {
   const q = String(req.query.q || req.query.awb || req.query.code || "").trim();
   if (!q) return res.status(400).json({ error: "Enter order ID or AWB" });

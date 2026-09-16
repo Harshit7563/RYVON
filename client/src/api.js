@@ -157,6 +157,8 @@ export const adminUpdateOrder = (id, status) =>
   req(`/admin/orders/${id}`, { method: "PATCH", headers: adminHeaders(), body: JSON.stringify({ status }) });
 export const adminPatchOrder = (id, body) =>
   req(`/admin/orders/${id}`, { method: "PATCH", headers: adminHeaders(), body: JSON.stringify(body) });
+export const adminDeleteOrder = (id) =>
+  req(`/admin/orders/${id}`, { method: "DELETE", headers: adminHeaders() });
 export const adminTrackOrder = (q) =>
   req(`/admin/tracking?q=${encodeURIComponent(q)}`, { headers: adminHeaders() });
 export const adminLiveTracking = () =>

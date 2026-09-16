@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { adminOrders, adminPatchOrder, adminUpdateOrder, inr, mediaUrl } from "../../api";
+import { adminDeleteOrder, adminOrders, adminPatchOrder, adminUpdateOrder, inr, mediaUrl } from "../../api";
 
 const STATUSES = ["pending_payment", "placed", "confirmed", "shipped", "delivered", "cancelled"];
 
@@ -81,6 +81,23 @@ export default function AdminOrders() {
       if (updated?.nimbusBookingError) setError(updated.nimbusBookingError);
     } catch (e) {
       setError(e.message || "NimbusPost sync failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (o) => {
+    const id = o?.id ?? o?.code;
+    if (!id) return;
+    if (!confirm(`Delete order ${o.code || id}? This cannot be undone.`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await adminDeleteOrder(id);
+      if (view && (view.id === o.id || view.code === o.code)) setView(null);
+      await load();
+    } catch (e) {
+      setError(e.message || "Delete failed");
     } finally {
       setBusy(false);
     }
@@ -189,6 +206,14 @@ export default function AdminOrders() {
                   </option>
                 ))}
               </select>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => remove(o)}
+                className="rounded-lg border border-tss/40 px-3 py-2 text-[11px] font-bold uppercase text-tss hover:bg-tss/5 disabled:opacity-50"
+              >
+                Delete
+              </button>
             </div>
           </div>
         ))}
@@ -309,6 +334,14 @@ export default function AdminOrders() {
                     {busy ? "…" : "Send to Nimbus"}
                   </button>
                 )}
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => remove(view)}
+                  className="rounded-lg border border-tss/40 px-3 py-2 text-[11px] font-bold uppercase text-tss hover:bg-tss/5 disabled:opacity-50"
+                >
+                  Delete
+                </button>
                 <Link
                   to={`/admin/track-order?q=${encodeURIComponent(view.awb || view.code)}`}
                   className="ml-auto rounded-lg bg-tss px-3 py-2 text-[11px] font-bold uppercase text-white"
