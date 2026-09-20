@@ -300,18 +300,24 @@ export default function AdminOrders() {
                 <Row label="AWB">{view.awb || "Not assigned (add below)"}</Row>
                 {view.courierName && <Row label="Courier">{view.courierName}</Row>}
                 {view.shipStatus && <Row label="Courier status">{view.shipStatus}</Row>}
-                {view.tracking?.events?.length > 0 && (
-                  <div className="mt-2 border-t border-line pt-2 text-left text-xs">
-                    <p className="mb-1 font-bold uppercase text-mute">Tracking</p>
-                    <ul className="max-h-40 space-y-1 overflow-y-auto text-mute">
-                      {view.tracking.events.slice(0, 12).map((ev, i) => (
-                        <li key={i}>
-                          {ev.status || ev.message || ev.event || "Update"}
-                          {ev.location ? ` · ${ev.location}` : ""}
-                          {ev.time || ev.date ? ` · ${ev.time || ev.date}` : ""}
-                        </li>
-                      ))}
-                    </ul>
+                {view.awb && (view.shipStatus || view.tracking?.message || view.tracking?.location) && (
+                  <div className="mt-2 border-t border-line pt-2 text-left text-xs text-mute">
+                    <p className="mb-1 font-bold uppercase text-mute">Live tracking</p>
+                    {view.shipStatus && <p>Status: {view.shipStatus}</p>}
+                    {view.tracking?.location && <p>Location: {view.tracking.location}</p>}
+                    {view.tracking?.message && <p>{view.tracking.message}</p>}
+                    {view.tracking?.eventTime && (
+                      <p>
+                        Updated:{" "}
+                        {new Date(view.tracking.eventTime).toLocaleString("en-IN", {
+                          day: "2-digit",
+                          month: "short",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          hour12: true,
+                        })}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
