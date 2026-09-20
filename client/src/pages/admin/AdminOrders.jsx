@@ -8,10 +8,11 @@ function paymentLabel(o) {
   const status = String(o?.paymentStatus || "").toLowerCase();
   const method = String(o?.payment || "").toLowerCase();
   if (status === "paid" || method === "paid") return "Paid";
-  if (o?.status === "pending_payment" || status === "pending") return "Pending";
+  if (status === "failed") return "Payment Failed";
+  if (o?.status === "pending_payment" || status === "pending") return "Pending payment";
   if (status === "cancelled" || o?.status === "cancelled") return "Cancelled";
   if (method === "cod" || status === "cod") return "COD";
-  if (method === "razorpay") return status === "paid" ? "Paid" : "Pending";
+  if (method === "razorpay") return status === "paid" ? "Paid" : "Pending payment";
   return o?.payment || "—";
 }
 

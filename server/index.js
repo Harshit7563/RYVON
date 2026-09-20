@@ -9,7 +9,9 @@ import { fileURLToPath } from "url";
 import { products as seedProducts, categories as seedCategories } from "./data/products.js";
 import {
   createRazorpayOrder,
+  fetchPaymentStatus,
   getRazorpayPublic,
+  isSuccessfulRazorpayPayment,
   razorpayConfigured,
   verifyPaymentSignature,
   verifyWebhookSignature,
@@ -893,6 +895,21 @@ app.post("/api/payments/razorpay/verify", async (req, res) => {
   });
   if (!ok) return res.status(400).json({ error: "Invalid payment signature" });
 
+  // Double-check with Razorpay API — signature alone must not mark failed payments as paid
+  const payment = await fetchPaymentStatus(razorpayPaymentId);
+  if (!isSuccessfulRazorpayPayment(payment)) {
+    const status = payment?.status || "unknown";
+    return res.status(402).json({
+      error: `Payment not successful (status: ${status})`,
+      success: false,
+      verified: false,
+      paymentStatus: status,
+    });
+  }
+  if (payment.order_id && payment.order_id !== razorpayOrderId) {
+    return res.status(400).json({ error: "Payment order mismatch" });
+  }
+
   reloadStore();
   let order = null;
   if (orderCode) {
@@ -906,7 +923,11 @@ app.post("/api/payments/razorpay/verify", async (req, res) => {
   }
 
   if (order) {
-    markOrderPaid(order, { razorpayOrderId, razorpayPaymentId });
+    markOrderPaid(order, {
+      razorpayOrderId,
+      razorpayPaymentId,
+      method: payment.method,
+    });
     saveStore(store);
     return res.json({ success: true, verified: true, order });
   }
@@ -950,7 +971,7 @@ app.post("/api/create-order", async (req, res) => {
 });
 
 /** Spec alias: POST /api/verify-payment */
-app.post("/api/verify-payment", (req, res) => {
+app.post("/api/verify-payment", async (req, res) => {
   const razorpayOrderId = req.body?.razorpay_order_id || req.body?.order_id;
   const razorpayPaymentId = req.body?.razorpay_payment_id || req.body?.payment_id;
   const razorpaySignature = req.body?.razorpay_signature || req.body?.signature;
@@ -969,12 +990,25 @@ app.post("/api/verify-payment", (req, res) => {
     return res.status(400).json({ success: false, error: "Invalid payment signature" });
   }
 
+  const payment = await fetchPaymentStatus(razorpayPaymentId);
+  if (!isSuccessfulRazorpayPayment(payment)) {
+    return res.status(402).json({
+      success: false,
+      verified: false,
+      error: `Payment not successful (status: ${payment?.status || "unknown"})`,
+    });
+  }
+
   reloadStore();
   let order = null;
   if (orderCode) order = store.orders.find((o) => o.code === orderCode);
   if (!order) order = store.orders.find((o) => o.razorpayOrderId === razorpayOrderId);
   if (order) {
-    markOrderPaid(order, { razorpayOrderId, razorpayPaymentId });
+    markOrderPaid(order, {
+      razorpayOrderId,
+      razorpayPaymentId,
+      method: payment.method,
+    });
     saveStore(store);
   }
 
@@ -988,7 +1022,7 @@ app.post("/api/verify-payment", (req, res) => {
 });
 
 app.post("/api/payments/razorpay/cancel", (req, res) => {
-  const { orderCode } = req.body || {};
+  const { orderCode, reason } = req.body || {};
   if (!orderCode) return res.status(400).json({ error: "Order code required" });
   reloadStore();
   const order = store.orders.find((o) => o.code === orderCode);
@@ -996,13 +1030,15 @@ app.post("/api/payments/razorpay/cancel", (req, res) => {
   if (order.paymentStatus === "paid") {
     return res.status(400).json({ error: "Paid order cannot be cancelled this way" });
   }
-  if (order.status !== "pending_payment") {
+  if (order.status !== "pending_payment" && order.paymentStatus !== "pending") {
     return res.status(400).json({ error: "Order is not awaiting payment" });
   }
   restoreStock(order.items);
+  const failed = String(reason || "").toLowerCase().includes("fail");
   order.status = "cancelled";
-  order.paymentStatus = "cancelled";
+  order.paymentStatus = failed ? "failed" : "cancelled";
   order.cancelledAt = new Date().toISOString();
+  if (reason) order.cancelReason = String(reason).slice(0, 200);
   saveStore(store);
   res.json({ ok: true, order });
 });
@@ -1029,6 +1065,20 @@ app.post("/api/payments/razorpay/webhook", async (req, res) => {
           razorpayPaymentId: paymentEntity.id,
           method: paymentEntity.method,
         });
+        saveStore(store);
+      }
+    } else if (event === "payment.failed" && paymentEntity) {
+      reloadStore();
+      const rzpOrderId = paymentEntity.order_id;
+      const order =
+        store.orders.find((o) => o.razorpayOrderId === rzpOrderId) ||
+        store.orders.find((o) => o.code === paymentEntity.notes?.orderCode);
+      if (order && order.paymentStatus !== "paid" && order.status === "pending_payment") {
+        restoreStock(order.items);
+        order.status = "cancelled";
+        order.paymentStatus = "failed";
+        order.cancelledAt = new Date().toISOString();
+        order.cancelReason = String(paymentEntity.error_description || paymentEntity.error_code || "Payment failed").slice(0, 200);
         saveStore(store);
       }
     }
@@ -1332,7 +1382,8 @@ app.get("/api/admin/stats", authAdmin, (_req, res) => {
     (s, o) => s + (o.status !== "cancelled" && o.status !== "pending_payment" ? o.total : 0),
     0
   );
-  const openOrders = store.orders.filter((o) => o.status === "placed" || o.status === "pending_payment").length;
+  // Do not count pending_payment — those are unpaid Razorpay attempts, not real orders yet
+  const openOrders = store.orders.filter((o) => o.status === "placed" || o.status === "confirmed").length;
   const unreadMessages = store.messages.filter((m) => !m.read).length;
   res.json({
     products: store.products.length,

@@ -62,8 +62,11 @@ export const getSite = () => req("/site");
 
 export const verifyRazorpayPayment = (body) =>
   req("/payments/razorpay/verify", { method: "POST", body: JSON.stringify(body) });
-export const cancelRazorpayPayment = (orderCode) =>
-  req("/payments/razorpay/cancel", { method: "POST", body: JSON.stringify({ orderCode }) });
+export const cancelRazorpayPayment = (orderCode, reason) =>
+  req("/payments/razorpay/cancel", {
+    method: "POST",
+    body: JSON.stringify({ orderCode, reason: reason || undefined }),
+  });
 export const resumeOrderPayment = (code) =>
   req(`/orders/${encodeURIComponent(code)}/pay`, { method: "POST", body: "{}" });
 

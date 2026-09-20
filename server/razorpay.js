@@ -78,6 +78,25 @@ export function verifyPaymentSignature({ orderId, paymentId, signature }) {
   }
 }
 
+/** Fetch payment from Razorpay and ensure it is actually captured/authorized. */
+export async function fetchPaymentStatus(paymentId) {
+  const rzp = getClient();
+  if (!rzp || !paymentId) return null;
+  try {
+    const payment = await rzp.payments.fetch(String(paymentId));
+    return payment;
+  } catch (e) {
+    console.error("[razorpay fetch payment]", e?.message || e);
+    return null;
+  }
+}
+
+export function isSuccessfulRazorpayPayment(payment) {
+  if (!payment) return false;
+  const status = String(payment.status || "").toLowerCase();
+  return status === "captured" || status === "authorized";
+}
+
 export function verifyWebhookSignature(rawBody, signature) {
   const webhookSecret = env("RAZORPAY_WEBHOOK_SECRET");
   if (!webhookSecret) return false;

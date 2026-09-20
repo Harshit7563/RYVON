@@ -4,6 +4,7 @@ import { adminOrders, adminStats } from "../../api";
 import {
   baselineOrders,
   ensureNotificationPermission,
+  isConfirmedOrder,
   notificationsSupported,
   notifyNewOrders,
   notifyPrefEnabled,
@@ -130,13 +131,11 @@ export default function AdminLayout() {
           primedRef.current = true;
           return;
         }
-        const prev = Number(localStorage.getItem("ryvon-admin-last-order-id") || 0);
-        const fresh = list
-          .filter((o) => (Number(o.id) || 0) > prev)
-          .sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+        // Only alert for paid / COD confirmed orders — not pending Razorpay checkouts
+        const { alerted } = notifyNewOrders(list, { onClick: () => nav("/admin/orders") });
+        const fresh = (alerted || []).filter(isConfirmedOrder);
         if (fresh.length === 0) return;
         const newest = fresh[fresh.length - 1];
-        notifyNewOrders(list, { onClick: () => nav("/admin/orders") });
         setToast({
           code: newest.code,
           name: newest.customer?.name || "Customer",

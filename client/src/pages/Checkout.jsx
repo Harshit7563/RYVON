@@ -211,7 +211,8 @@ export default function Checkout() {
     } catch (err) {
       if (createdCode && payment === "razorpay" && paymentStarted) {
         try {
-          await cancelRazorpayPayment(createdCode);
+          const msg = err?.message || "Payment failed";
+          await cancelRazorpayPayment(createdCode, msg);
         } catch {
           /* ignore */
         }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { getOrder, getSite, inr, mediaUrl, resumeOrderPayment, verifyRazorpayPayment } from "../api";
+import { getOrder, getSite, inr, mediaUrl, resumeOrderPayment, verifyRazorpayPayment, cancelRazorpayPayment } from "../api";
 import { openRazorpayCheckout } from "../razorpay";
 
 const LAST_ORDER_KEY = "ryvon-last-order";
@@ -88,6 +88,13 @@ export default function ThankYou() {
       setOrder(fresh);
       saveLastOrder(fresh);
     } catch (e) {
+      if (order?.code) {
+        try {
+          await cancelRazorpayPayment(order.code, e.message || "Payment failed");
+        } catch {
+          /* ignore */
+        }
+      }
       setPayErr(e.message || "Payment could not be completed");
     } finally {
       setPayBusy(false);
