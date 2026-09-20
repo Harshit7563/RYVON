@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { getOrder, inr } from "../api";
+import { formatOrderDateTime } from "../formatDate";
 
 const STEPS = ["placed", "confirmed", "shipped", "delivered"];
 
@@ -52,6 +53,11 @@ export default function TrackOrder() {
             <div>
               <p className="text-xs uppercase text-mute">Order ID</p>
               <p className="font-display text-lg font-extrabold">{order.code}</p>
+              {order.createdAt && (
+                <p className="mt-1 text-sm font-semibold text-ink">
+                  Placed on {formatOrderDateTime(order.createdAt, { withSeconds: true })}
+                </p>
+              )}
             </div>
             <span className="rounded bg-tss/10 px-2 py-1 text-[11px] font-bold uppercase text-tss">{order.status}</span>
           </div>
@@ -66,29 +72,56 @@ export default function TrackOrder() {
           </div>
 
           <div className="mt-6 space-y-2 border-t border-line pt-4 text-sm">
-            <p><span className="text-mute">Ship to:</span> {order.customer.name}, {order.customer.city}</p>
-            <p><span className="text-mute">Total:</span> <strong>{inr(order.total)}</strong></p>
+            <p>
+              <span className="text-mute">Order date & time:</span>{" "}
+              <strong>{formatOrderDateTime(order.createdAt, { withSeconds: true }) || "—"}</strong>
+            </p>
+            {order.paidAt && (
+              <p>
+                <span className="text-mute">Paid at:</span>{" "}
+                <strong>{formatOrderDateTime(order.paidAt)}</strong>
+              </p>
+            )}
+            <p>
+              <span className="text-mute">Ship to:</span> {order.customer.name}, {order.customer.city}
+            </p>
+            <p>
+              <span className="text-mute">Total:</span> <strong>{inr(order.total)}</strong>
+            </p>
             {order.awb && (
-              <p><span className="text-mute">AWB:</span> <strong>{order.awb}</strong> {order.courierName ? `· ${order.courierName}` : ""}</p>
+              <p>
+                <span className="text-mute">AWB:</span> <strong>{order.awb}</strong>{" "}
+                {order.courierName ? `· ${order.courierName}` : ""}
+              </p>
             )}
             {order.tracking?.shipStatus && (
-              <p><span className="text-mute">Courier:</span> {order.tracking.shipStatus}{order.tracking.location ? ` · ${order.tracking.location}` : ""}</p>
+              <p>
+                <span className="text-mute">Courier:</span> {order.tracking.shipStatus}
+                {order.tracking.location ? ` · ${order.tracking.location}` : ""}
+              </p>
             )}
             {order.tracking?.message && <p className="text-mute">{order.tracking.message}</p>}
             {order.tracking?.edd && (
-              <p><span className="text-mute">EDD:</span> {new Date(order.tracking.edd).toLocaleDateString()}</p>
+              <p>
+                <span className="text-mute">EDD:</span> {new Date(order.tracking.edd).toLocaleDateString("en-IN")}
+              </p>
             )}
           </div>
           <ul className="mt-3 space-y-1 text-sm text-mute">
             {order.items.map((i, idx) => (
-              <li key={idx}>• {i.name} (UK {i.size}) ×{i.qty}</li>
+              <li key={idx}>
+                • {i.name} (UK {i.size}) ×{i.qty}
+              </li>
             ))}
           </ul>
         </div>
       )}
 
       <p className="mt-8 text-center text-sm">
-        Need help? <Link to="/contact" className="font-bold text-tss underline">Contact us</Link>
+        Need help?{" "}
+        <Link to="/contact" className="font-bold text-tss underline">
+          Contact us
+        </Link>
       </p>
     </div>
   );

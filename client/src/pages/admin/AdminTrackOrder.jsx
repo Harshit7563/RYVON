@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { adminLiveTracking, adminPatchOrder, adminTrackOrder, inr } from "../../api";
+import { formatOrderDateTime } from "../../formatDate";
 
 function fmt(dt) {
-  if (!dt) return "—";
-  const d = new Date(dt);
-  return Number.isNaN(d.getTime()) ? String(dt) : d.toLocaleString();
+  return formatOrderDateTime(dt, { withSeconds: true }) || "—";
 }
 
 function TrackingCard({ tracking, order }) {
@@ -25,6 +24,8 @@ function TrackingCard({ tracking, order }) {
         </span>
       </div>
       <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
+        <p><span className="text-mute">Order date:</span> {fmt(order?.createdAt)}</p>
+        <p><span className="text-mute">Paid at:</span> {fmt(order?.paidAt)}</p>
         <p><span className="text-mute">Customer:</span> {order?.customer?.name || "—"}</p>
         <p><span className="text-mute">Phone:</span> {order?.customer?.phone || "—"}</p>
         <p><span className="text-mute">Location:</span> {tracking?.location || "—"}</p>

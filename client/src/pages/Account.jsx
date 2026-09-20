@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { getMyOrders, inr, mediaUrl } from "../api";
 import { useAuth } from "../context/AuthContext";
 import { useWishlist } from "../context/WishlistContext";
+import { formatOrderDateTime } from "../formatDate";
 
 export default function Account() {
   const { user, openLogin, logout } = useAuth();
@@ -86,9 +87,12 @@ export default function Account() {
                 >
                   <div>
                     <p className="font-display text-base font-extrabold">{o.code}</p>
-                    <p className="mt-1 text-[12px] text-mute">
-                      {o.createdAt ? new Date(o.createdAt).toLocaleString() : ""}
-                      {" · "}
+                    <p className="mt-1 text-[12px] font-semibold text-ink">
+                      {o.createdAt
+                        ? `Placed on ${formatOrderDateTime(o.createdAt, { withSeconds: true })}`
+                        : "Date unavailable"}
+                    </p>
+                    <p className="mt-0.5 text-[12px] text-mute">
                       {o.items?.length || 0} item{(o.items?.length || 0) === 1 ? "" : "s"}
                     </p>
                   </div>
@@ -122,6 +126,18 @@ export default function Account() {
                       ))}
                     </ul>
                     <div className="mt-4 space-y-1 border-t border-line pt-3 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-mute">Order date & time</span>
+                        <span className="font-semibold text-right">
+                          {formatOrderDateTime(o.createdAt, { withSeconds: true }) || "—"}
+                        </span>
+                      </div>
+                      {o.paidAt && (
+                        <div className="flex justify-between">
+                          <span className="text-mute">Paid at</span>
+                          <span className="font-semibold text-right">{formatOrderDateTime(o.paidAt)}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between"><span className="text-mute">Subtotal</span><span>{inr(o.subtotal)}</span></div>
                       {o.discount > 0 && (
                         <div className="flex justify-between text-off">

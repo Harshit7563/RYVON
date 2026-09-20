@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { adminDeleteOrder, adminOrders, adminPatchOrder, adminUpdateOrder, inr, mediaUrl } from "../../api";
+import { formatOrderDateTime } from "../../formatDate";
 
 const STATUSES = ["pending_payment", "placed", "confirmed", "shipped", "delivered", "cancelled"];
 
@@ -175,15 +176,8 @@ export default function AdminOrders() {
                 </p>
                 <p className="mt-1 text-[11px] font-semibold text-ink">
                   {o.createdAt
-                    ? new Date(o.createdAt).toLocaleString("en-IN", {
-                        day: "2-digit",
-                        month: "short",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        hour12: true,
-                      })
-                    : ""}
+                    ? `Placed on ${formatOrderDateTime(o.createdAt, { withSeconds: true })}`
+                    : "Date unavailable"}
                 </p>
               </div>
               <div className="text-right">
@@ -271,30 +265,11 @@ export default function AdminOrders() {
                 )}
                 {view.couponCode && <Row label="Coupon">{view.couponCode}</Row>}
                 <Row label="Shipping">{view.shipping ? inr(view.shipping) : "FREE"}</Row>
-                <Row label="Placed">
-                  {view.createdAt
-                    ? new Date(view.createdAt).toLocaleString("en-IN", {
-                        day: "2-digit",
-                        month: "short",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        second: "2-digit",
-                        hour12: true,
-                      })
-                    : "—"}
+                <Row label="Order date & time">
+                  {formatOrderDateTime(view.createdAt, { withSeconds: true }) || "—"}
                 </Row>
                 {view.paidAt && (
-                  <Row label="Paid at">
-                    {new Date(view.paidAt).toLocaleString("en-IN", {
-                      day: "2-digit",
-                      month: "short",
-                      year: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      hour12: true,
-                    })}
-                  </Row>
+                  <Row label="Paid at">{formatOrderDateTime(view.paidAt)}</Row>
                 )}
                 {view.razorpayPaymentId && <Row label="Payment ID">{view.razorpayPaymentId}</Row>}
                 {view.razorpayOrderId && <Row label="Razorpay order">{view.razorpayOrderId}</Row>}

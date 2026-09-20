@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { adminUpdateUser, adminUserOrders, adminUsers, inr, mediaUrl } from "../../api";
+import { formatOrderDateTime } from "../../formatDate";
 
 export default function AdminUsers() {
   const [list, setList] = useState([]);
@@ -180,8 +181,10 @@ export default function AdminUsers() {
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div>
                         <p className="font-display font-extrabold">{o.code}</p>
-                        <p className="text-[11px] text-mute">
-                          {o.createdAt ? new Date(o.createdAt).toLocaleString() : ""}
+                        <p className="text-[11px] font-semibold text-ink">
+                          {o.createdAt
+                            ? `Placed on ${formatOrderDateTime(o.createdAt, { withSeconds: true })}`
+                            : "Date unavailable"}
                         </p>
                       </div>
                       <div className="text-right">

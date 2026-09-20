@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { getOrder, getSite, inr, mediaUrl, resumeOrderPayment, verifyRazorpayPayment, cancelRazorpayPayment } from "../api";
+import { formatOrderDateTime } from "../formatDate";
 import { openRazorpayCheckout } from "../razorpay";
 
 const LAST_ORDER_KEY = "ryvon-last-order";
@@ -160,15 +161,7 @@ export default function ThankYou() {
 
           {order.createdAt && (
             <p className="relative mt-3 text-sm font-semibold text-ink">
-              Placed on{" "}
-              {new Date(order.createdAt).toLocaleString("en-IN", {
-                day: "2-digit",
-                month: "short",
-                year: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-                hour12: true,
-              })}
+              Order date & time: {formatOrderDateTime(order.createdAt, { withSeconds: true })}
             </p>
           )}
 
@@ -195,14 +188,12 @@ export default function ThankYou() {
               <p className="font-display mt-1 text-2xl font-extrabold tracking-wide text-ink">{order.code}</p>
               {order.createdAt && (
                 <p className="mt-1 text-xs font-semibold text-ink">
-                  {new Date(order.createdAt).toLocaleString("en-IN", {
-                    day: "2-digit",
-                    month: "short",
-                    year: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    hour12: true,
-                  })}
+                  Placed on {formatOrderDateTime(order.createdAt, { withSeconds: true })}
+                </p>
+              )}
+              {order.paidAt && (
+                <p className="mt-0.5 text-xs font-semibold text-ink">
+                  Paid at {formatOrderDateTime(order.paidAt)}
                 </p>
               )}
               <p className="mt-1 text-xs text-mute">Save this to track your delivery</p>
