@@ -84,9 +84,15 @@ export default function Product() {
       setSizeHint(true);
       return;
     }
+    const left = Math.max(0, Number(product.stock?.[String(size)]) || 0);
+    if (left <= 0) {
+      setSizeHint(true);
+      return;
+    }
+    const buyQty = Math.min(qty, left);
     const swatches = productColors(product);
     const picked = swatches[Math.min(color, swatches.length - 1)] || swatches[0];
-    for (let i = 0; i < qty; i++) add(product, size, picked?.hex || "#111111");
+    for (let i = 0; i < buyQty; i++) add(product, size, picked?.hex || "#111111");
     setAdded(true);
     setTimeout(() => setAdded(false), 1600);
     if (goCheckout) nav("/checkout");
@@ -123,6 +129,8 @@ export default function Product() {
   const selectedColor = colors[Math.min(color, colors.length - 1)] || colors[0];
   const off = (product.mrp || product.price) - product.price;
   const offPct = product.mrp ? Math.round((off / product.mrp) * 100) : 0;
+  const stockLeft = size != null ? Math.max(0, Number(product.stock?.[String(size)]) || 0) : 0;
+  const maxQty = stockLeft > 0 ? Math.min(stockLeft, 20) : 0;
 
   return (
     <div className="mx-auto max-w-[1280px] px-0 pb-28 sm:px-4 sm:pb-10 lg:px-6 lg:py-8">
@@ -256,6 +264,8 @@ export default function Product() {
                       if (oos) return;
                       setSize(s);
                       setSizeHint(false);
+                      const left = Math.max(0, Number(product.stock?.[String(s)]) || 0);
+                      setQty((q) => Math.min(Math.max(1, q), Math.max(1, left)));
                     }}
                     className={`relative grid h-11 min-w-11 place-items-center border px-2 text-sm font-bold transition ${
                       oos
@@ -282,8 +292,20 @@ export default function Product() {
             <div className="mt-2 inline-flex border border-line">
               <button type="button" className="h-10 w-10 text-lg" onClick={() => setQty((q) => Math.max(1, q - 1))}>−</button>
               <span className="grid h-10 w-10 place-items-center border-x border-line text-sm font-bold">{qty}</span>
-              <button type="button" className="h-10 w-10 text-lg" onClick={() => setQty((q) => Math.min(6, q + 1))}>+</button>
+              <button
+                type="button"
+                className="h-10 w-10 text-lg disabled:opacity-40"
+                disabled={!size || maxQty <= 0 || qty >= maxQty}
+                onClick={() => setQty((q) => Math.min(maxQty || 1, q + 1))}
+              >
+                +
+              </button>
             </div>
+            {size && (
+              <p className="mt-1.5 text-xs text-mute">
+                {stockLeft > 0 ? `${stockLeft} in stock` : "Out of stock"}
+              </p>
+            )}
           </div>
 
           {/* Desktop CTAs */}

@@ -11,7 +11,7 @@ export const SIZE_CHART = [
 
 export const ALL_UK_SIZES = SIZE_CHART.map((r) => r.uk);
 
-export function defaultStock(sizes = ALL_UK_SIZES, qty = 10) {
+export function defaultStock(sizes = ALL_UK_SIZES, qty = 0) {
   const stock = {};
   sizes.forEach((s) => {
     stock[String(s)] = qty;

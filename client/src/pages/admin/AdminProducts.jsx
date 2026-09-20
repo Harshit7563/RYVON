@@ -43,7 +43,7 @@ const EMPTY = () => ({
     { name: "White", hex: "#f5f5f5" },
   ],
   sizes: [7, 8, 9, 10, 11],
-  stock: defaultStock([7, 8, 9, 10, 11], 10),
+  stock: defaultStock([7, 8, 9, 10, 11], 0),
   featuredTop: false,
 });
 
@@ -65,7 +65,7 @@ function normalizeStock(p, sizes) {
   const stock = { ...(p?.stock || {}) };
   sizes.forEach((s) => {
     const k = String(s);
-    if (stock[k] == null) stock[k] = 10;
+    if (stock[k] == null) stock[k] = 0;
   });
   return stock;
 }
@@ -171,7 +171,7 @@ export default function AdminProducts() {
       if (!sizes.length) return f;
       const stock = { ...f.stock };
       if (has) delete stock[String(size)];
-      else if (stock[String(size)] == null) stock[String(size)] = 10;
+      else if (stock[String(size)] == null) stock[String(size)] = 0;
       return { ...f, sizes, stock };
     });
   };

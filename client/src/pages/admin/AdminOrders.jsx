@@ -32,6 +32,8 @@ export default function AdminOrders() {
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState(null);
 
+  const [awbDraft, setAwbDraft] = useState("");
+
   const load = async () => {
     setBusy(true);
     setError("");
@@ -52,6 +54,7 @@ export default function AdminOrders() {
 
   useEffect(() => {
     if (!view) return undefined;
+    setAwbDraft(view.awb || "");
     const onKey = (e) => {
       if (e.key === "Escape") setView(null);
     };
@@ -71,16 +74,15 @@ export default function AdminOrders() {
     }
   };
 
-  const pushNimbus = async (id) => {
+  const saveAwb = async (id) => {
     setBusy(true);
     setError("");
     try {
-      const updated = await adminPatchOrder(id, { syncNimbus: true, status: "confirmed" });
+      const updated = await adminPatchOrder(id, { awb: awbDraft.trim() });
       await load();
       setView(updated);
-      if (updated?.nimbusBookingError) setError(updated.nimbusBookingError);
     } catch (e) {
-      setError(e.message || "NimbusPost sync failed");
+      setError(e.message || "Could not save AWB / tracking");
     } finally {
       setBusy(false);
     }
@@ -170,8 +172,17 @@ export default function AdminOrders() {
                 <p className="text-sm text-mute">
                   {o.customer?.name || "—"} · {o.customer?.phone || "—"}
                 </p>
-                <p className="mt-1 text-[11px] text-mute">
-                  {o.createdAt ? new Date(o.createdAt).toLocaleString() : ""}
+                <p className="mt-1 text-[11px] font-semibold text-ink">
+                  {o.createdAt
+                    ? new Date(o.createdAt).toLocaleString("en-IN", {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        hour12: true,
+                      })
+                    : ""}
                 </p>
               </div>
               <div className="text-right">
@@ -260,22 +271,70 @@ export default function AdminOrders() {
                 {view.couponCode && <Row label="Coupon">{view.couponCode}</Row>}
                 <Row label="Shipping">{view.shipping ? inr(view.shipping) : "FREE"}</Row>
                 <Row label="Placed">
-                  {view.createdAt ? new Date(view.createdAt).toLocaleString() : "—"}
+                  {view.createdAt
+                    ? new Date(view.createdAt).toLocaleString("en-IN", {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        second: "2-digit",
+                        hour12: true,
+                      })
+                    : "—"}
                 </Row>
                 {view.paidAt && (
-                  <Row label="Paid at">{new Date(view.paidAt).toLocaleString()}</Row>
+                  <Row label="Paid at">
+                    {new Date(view.paidAt).toLocaleString("en-IN", {
+                      day: "2-digit",
+                      month: "short",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      hour12: true,
+                    })}
+                  </Row>
                 )}
                 {view.razorpayPaymentId && <Row label="Payment ID">{view.razorpayPaymentId}</Row>}
                 {view.razorpayOrderId && <Row label="Razorpay order">{view.razorpayOrderId}</Row>}
-                <Row label="AWB">{view.awb || "Not assigned"}</Row>
+                <Row label="AWB">{view.awb || "Not assigned (add below)"}</Row>
                 {view.courierName && <Row label="Courier">{view.courierName}</Row>}
                 {view.shipStatus && <Row label="Courier status">{view.shipStatus}</Row>}
-                {view.nimbusOrderId && <Row label="Nimbus order">{view.nimbusOrderId}</Row>}
-                {view.nimbusBookingError && (
-                  <Row label="NimbusPost">
-                    <span className="text-tss">{String(view.nimbusBookingError || "").slice(0, 220)}</span>
-                  </Row>
+                {view.tracking?.events?.length > 0 && (
+                  <div className="mt-2 border-t border-line pt-2 text-left text-xs">
+                    <p className="mb-1 font-bold uppercase text-mute">Tracking</p>
+                    <ul className="max-h-40 space-y-1 overflow-y-auto text-mute">
+                      {view.tracking.events.slice(0, 12).map((ev, i) => (
+                        <li key={i}>
+                          {ev.status || ev.message || ev.event || "Update"}
+                          {ev.location ? ` · ${ev.location}` : ""}
+                          {ev.time || ev.date ? ` · ${ev.time || ev.date}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
+              </div>
+
+              <div className="mt-4 rounded-xl border border-line p-3">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-mute">Manual AWB (Nimbus track)</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <input
+                    value={awbDraft}
+                    onChange={(e) => setAwbDraft(e.target.value)}
+                    placeholder="Enter AWB / tracking number"
+                    className="min-w-[12rem] flex-1 border border-line px-3 py-2 text-sm outline-none focus:border-tss"
+                  />
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => saveAwb(view.id)}
+                    className="rounded-lg bg-ink px-3 py-2 text-[11px] font-bold uppercase text-white hover:bg-black disabled:opacity-50"
+                  >
+                    {busy ? "…" : "Save & Track"}
+                  </button>
+                </div>
+                <p className="mt-1.5 text-[11px] text-mute">Shipping is manual — paste AWB after you book outside RYVON.</p>
               </div>
 
               <h3 className="mt-5 text-[11px] font-bold uppercase tracking-wide text-mute">Customer</h3>
@@ -324,16 +383,6 @@ export default function AdminOrders() {
                     </option>
                   ))}
                 </select>
-                {!view.awb && (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => pushNimbus(view.id)}
-                    className="rounded-lg border border-line px-3 py-2 text-[11px] font-bold uppercase hover:border-tss disabled:opacity-50"
-                  >
-                    {busy ? "…" : "Send to Nimbus"}
-                  </button>
-                )}
                 <button
                   type="button"
                   disabled={busy}

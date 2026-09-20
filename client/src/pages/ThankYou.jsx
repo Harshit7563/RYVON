@@ -151,6 +151,20 @@ export default function ThankYou() {
             </p>
           )}
 
+          {order.createdAt && (
+            <p className="relative mt-3 text-sm font-semibold text-ink">
+              Placed on{" "}
+              {new Date(order.createdAt).toLocaleString("en-IN", {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: true,
+              })}
+            </p>
+          )}
+
           {pendingPay && (
             <div className="relative mt-6">
               <button
@@ -172,6 +186,18 @@ export default function ThankYou() {
             <div>
               <p className="text-[10px] font-bold uppercase tracking-wider text-mute">Your order ID</p>
               <p className="font-display mt-1 text-2xl font-extrabold tracking-wide text-ink">{order.code}</p>
+              {order.createdAt && (
+                <p className="mt-1 text-xs font-semibold text-ink">
+                  {new Date(order.createdAt).toLocaleString("en-IN", {
+                    day: "2-digit",
+                    month: "short",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    hour12: true,
+                  })}
+                </p>
+              )}
               <p className="mt-1 text-xs text-mute">Save this to track your delivery</p>
             </div>
             <Link
@@ -181,6 +207,14 @@ export default function ThankYou() {
               Track order
             </Link>
           </div>
+          {(order.awb || order.shipStatus || order.courierName) && (
+            <div className="mt-4 border-t border-line pt-4 text-sm">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-mute">Shipment</p>
+              {order.awb && <p className="mt-1 font-semibold">AWB: {order.awb}</p>}
+              {order.courierName && <p className="text-mute">Courier: {order.courierName}</p>}
+              {order.shipStatus && <p className="text-mute">Status: {order.shipStatus}</p>}
+            </div>
+          )}
         </div>
 
         {paid && order.prepaidDiscount > 0 && (

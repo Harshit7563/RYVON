@@ -15,8 +15,6 @@ import {
   verifyWebhookSignature,
 } from "./razorpay.js";
 import {
-  applyNimbusResultToOrder,
-  createAndBookShipment,
   nimbusConfigured,
   summarizeTracking,
   trackBulk,
@@ -268,7 +266,8 @@ function ensureStore(s) {
     if (!p.stock || typeof p.stock !== "object") p.stock = {};
     p.sizes.forEach((sz) => {
       const key = String(sz);
-      if (p.stock[key] == null || p.stock[key] === "") p.stock[key] = 10;
+      // Never invent stock — missing/blank means 0 (admin sets real qty)
+      if (p.stock[key] == null || p.stock[key] === "") p.stock[key] = 0;
       else p.stock[key] = Math.max(0, Number(p.stock[key]) || 0);
     });
   });
@@ -504,11 +503,14 @@ function resolveOrderLines(rawItems) {
     if (!sizeOk) {
       return { ok: false, error: `${product.name}: size UK ${sizeKey} not available` };
     }
-    const stockQty = product.stock?.[sizeKey];
-    if (stockQty != null && Number(stockQty) < qty) {
+    const stockQty = Math.max(0, Number(product.stock?.[sizeKey]) || 0);
+    if (stockQty < qty) {
       return {
         ok: false,
-        error: `${product.name} (UK ${sizeKey}) only has ${stockQty} left`,
+        error:
+          stockQty <= 0
+            ? `${product.name} (UK ${sizeKey}) is out of stock`
+            : `${product.name} (UK ${sizeKey}) only has ${stockQty} left`,
       };
     }
     lines.push({
@@ -531,7 +533,7 @@ function decrementStock(lines) {
     if (!product.stock || typeof product.stock !== "object") product.stock = {};
     const key = String(line.size);
     const current = Number(product.stock[key]);
-    const base = Number.isFinite(current) ? current : 10;
+    const base = Number.isFinite(current) ? current : 0;
     product.stock[key] = Math.max(0, base - Number(line.qty));
   }
 }
@@ -576,18 +578,7 @@ function applyTrackingToOrder(order, summary) {
   return order;
 }
 
-/** Push RYVON order to NimbusPost portal (create+book, fallback create-only). */
-async function syncOrderToNimbus(order, label = "nimbus") {
-  if (!order || order.awb || !nimbusConfigured()) return order;
-  try {
-    const result = await createAndBookShipment(order);
-    applyNimbusResultToOrder(order, result);
-  } catch (err) {
-    console.error(`[${label}]`, err?.message || err);
-    order.nimbusBookingError = err?.message || "NimbusPost booking failed";
-  }
-  return order;
-}
+/** Nimbus create/book disabled — shipping is manual; Nimbus is track-only via AWB. */
 
 app.get("/api/site", (_req, res) => {
   const rzp = getRazorpayPublic();
@@ -778,10 +769,13 @@ app.post("/api/orders", async (req, res) => {
   for (const line of lines) {
     const product = store.products.find((p) => p.id === line.productId);
     const key = String(line.size);
-    const left = product?.stock?.[key];
-    if (left != null && Number(left) < line.qty) {
+    const left = Math.max(0, Number(product?.stock?.[key]) || 0);
+    if (left < line.qty) {
       return res.status(400).json({
-        error: `${product.name} (UK ${key}) only has ${left} left`,
+        error:
+          left <= 0
+            ? `${product?.name || "Item"} (UK ${key}) is out of stock`
+            : `${product?.name || "Item"} (UK ${key}) only has ${left} left`,
       });
     }
   }
@@ -820,8 +814,6 @@ app.post("/api/orders", async (req, res) => {
   });
 
   if (!wantsOnline) {
-    // COD: push to NimbusPost portal immediately (create+book).
-    await syncOrderToNimbus(order, "nimbus create+book COD");
     saveStore(store);
     return res.status(201).json(order);
   }
@@ -915,7 +907,6 @@ app.post("/api/payments/razorpay/verify", async (req, res) => {
 
   if (order) {
     markOrderPaid(order, { razorpayOrderId, razorpayPaymentId });
-    await syncOrderToNimbus(order, "nimbus create+book razorpay");
     saveStore(store);
     return res.json({ success: true, verified: true, order });
   }
@@ -1038,10 +1029,6 @@ app.post("/api/payments/razorpay/webhook", async (req, res) => {
           razorpayPaymentId: paymentEntity.id,
           method: paymentEntity.method,
         });
-        await syncOrderToNimbus(order, "nimbus create+book razorpay webhook");
-        saveStore(store);
-      } else if (order && order.paymentStatus === "paid" && !order.awb) {
-        await syncOrderToNimbus(order, "nimbus create+book razorpay webhook retry");
         saveStore(store);
       }
     }
@@ -1433,7 +1420,7 @@ app.post("/api/admin/products", authAdmin, (req, res) => {
   const stock = {};
   sizes.forEach((s) => {
     const key = String(s);
-    stock[key] = b.stock && b.stock[key] != null ? Number(b.stock[key]) : 10;
+    stock[key] = b.stock && b.stock[key] != null ? Math.max(0, Number(b.stock[key]) || 0) : 0;
   });
   const images = Array.isArray(b.images) && b.images.length ? b.images : [b.image || "/products/p1.jpg"];
   const now = new Date().toISOString();
@@ -1497,7 +1484,7 @@ app.put("/api/admin/products/:id", authAdmin, (req, res) => {
   }
   sizes.forEach((s) => {
     const key = String(s);
-    if (stock[key] == null) stock[key] = 10;
+    if (stock[key] == null) stock[key] = 0;
   });
   Object.keys(stock).forEach((k) => {
     if (!sizes.includes(Number(k))) delete stock[k];
@@ -1694,22 +1681,7 @@ app.patch("/api/admin/orders/:id", authAdmin, async (req, res) => {
     restoreStock(o.items);
   }
 
-  // Admin: confirmed / ship-now → push to NimbusPost portal.
-  const wantsShip =
-    req.body?.ship === true ||
-    req.body?.syncNimbus === true ||
-    (o.status === "confirmed" && !o.awb);
-  if (wantsShip && !o.awb && nimbusConfigured()) {
-    const paymentOk =
-      String(o.paymentStatus || "").toLowerCase() === "cod" ||
-      String(o.payment || "").toLowerCase() === "cod" ||
-      String(o.paymentStatus || "").toLowerCase() === "paid" ||
-      String(o.payment || "").toLowerCase() === "paid";
-    if (paymentOk || req.body?.ship === true || req.body?.syncNimbus === true) {
-      await syncOrderToNimbus(o, "nimbus create+book admin");
-    }
-  }
-
+  // Track-only: when admin saves an AWB, refresh status from NimbusPost
   if (o.awb && nimbusConfigured()) {
     try {
       const data = await trackByAwb(o.awb);
